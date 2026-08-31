@@ -1,0 +1,35 @@
+criteria:
+  collinearity_threshold: 0.9
+  correlation_threshold: 0.05
+selected_count: 28
+selected_features:
+- issue_hour_cos
+- issue_hour_sin
+- target_day_of_week_sin
+- target_day_of_week_cos
+- target_day_of_year_cos
+- target_day_of_year_sin
+- target_time_night
+- target_day_of_week
+- issue_hour
+- target_time_morning
+- weather_target_cdd18
+- temperature_c
+- weather_target_hdd18
+- wind_speed_kmh
+- dew_point_c
+- relative_humidity_pct
+- precipitation_mm
+- demand_lag_1h
+- demand_lag_168h
+- demand_lag_48h
+- demand_lag_24h
+- demand_lag_2h
+- demand_rolling_mean_168h
+- demand_rolling_mean_24h
+- demand_rolling_mean_6h
+- demand_rolling_std_168h
+- is_holiday
+- is_day_before_holiday
+selection_date: '2026-08-30T21:33:56.562595'
+total_features: 40
