@@ -1,0 +1,873 @@
+{
+  "datasets": [
+    {
+      "name": "937071e1",
+      "displayName": "gen_output_capability_by_zone",
+      "config": {
+        "version": "1.1",
+        "source": "workspace.energy_forecast.gen_output_capability_by_zone",
+        "dimensions": [
+          {
+            "expr": "source.*"
+          },
+          {
+            "name": "Hour",
+            "expr": "HOUR(source.`datetime`)",
+            "displayName": "Hour of Day",
+            "comment": "Hour of day (0-23) extracted from datetime"
+          }
+        ],
+        "measures": [
+          {
+            "name": "count",
+            "expr": "COUNT(*)",
+            "comment": "Represents the total number of rows in the dataset. Use this measure to count all",
+            "displayName": "Count"
+          }
+        ]
+      }
+    }
+  ],
+  "pages": [
+    {
+      "name": "913313b4",
+      "displayName": "Ontario",
+      "layout": [
+        {
+          "widget": {
+            "name": "kpi_total_output",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "937071e1",
+                  "fields": [
+                    {
+                      "name": "sum(OutputMW)",
+                      "expression": "SUM(`OutputMW`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Total Output (MW)"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(OutputMW)",
+                  "rowNumber": 0
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_total_capability",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "937071e1",
+                  "fields": [
+                    {
+                      "name": "sum(CapabilityMW)",
+                      "expression": "SUM(`CapabilityMW`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Total Capability (MW)"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(CapabilityMW)",
+                  "rowNumber": 0
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 0,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_avg_utilization",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "937071e1",
+                  "fields": [
+                    {
+                      "name": "avg(UtilizationRate)",
+                      "expression": "AVG(`UtilizationRate`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Avg Utilization Rate"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "avg(UtilizationRate)",
+                  "rowNumber": 0
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 0,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "bar_output_by_zone",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "937071e1",
+                  "fields": [
+                    {
+                      "name": "Zone",
+                      "expression": "`Zone`"
+                    },
+                    {
+                      "name": "sum(OutputMW)",
+                      "expression": "SUM(`OutputMW`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "showDescription": false,
+                "title": {
+                  "value": "Output MW by Zone",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "Zone",
+                  "displayName": "Zone",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(OutputMW)",
+                  "displayName": "OutputMW",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "Zone",
+                  "displayName": "Zone",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "label": {
+                  "show": false
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "line_utilization_time",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "937071e1",
+                  "fields": [
+                    {
+                      "name": "daily(datetime)",
+                      "expression": "DATE_TRUNC(\"DAY\", `datetime`)"
+                    },
+                    {
+                      "name": "avg(UtilizationRate)",
+                      "expression": "AVG(`UtilizationRate`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Utilization Rate Over Time"
+              },
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "daily(datetime)",
+                  "displayName": "Day",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "fieldName": "avg(UtilizationRate)",
+                  "displayName": "UtilizationRate",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 8,
+            "width": 6,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "bar_output_by_fueltype",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "937071e1",
+                  "fields": [
+                    {
+                      "name": "FuelType",
+                      "expression": "`FuelType`"
+                    },
+                    {
+                      "name": "sum(OutputMW)",
+                      "expression": "SUM(`OutputMW`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Output MW by Fuel Type"
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "FuelType",
+                  "displayName": "FuelType",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(OutputMW)",
+                  "displayName": "OutputMW",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "FuelType",
+                  "displayName": "FuelType",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 2,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "table_gen_details",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "937071e1",
+                  "fields": [
+                    {
+                      "name": "Zone",
+                      "expression": "`Zone`"
+                    },
+                    {
+                      "name": "FuelType",
+                      "expression": "`FuelType`"
+                    },
+                    {
+                      "name": "sum(OutputMW)",
+                      "expression": "SUM(`OutputMW`)"
+                    },
+                    {
+                      "name": "sum(CapabilityMW)",
+                      "expression": "SUM(`CapabilityMW`)"
+                    },
+                    {
+                      "name": "sum(NumGenerators)",
+                      "expression": "SUM(`NumGenerators`)"
+                    },
+                    {
+                      "name": "avg(UtilizationRate)",
+                      "expression": "AVG(`UtilizationRate`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Generation Details by Zone & Fuel Type"
+              },
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "Zone"
+                  },
+                  {
+                    "fieldName": "FuelType"
+                  },
+                  {
+                    "fieldName": "sum(OutputMW)"
+                  },
+                  {
+                    "fieldName": "sum(CapabilityMW)"
+                  },
+                  {
+                    "fieldName": "sum(NumGenerators)"
+                  },
+                  {
+                    "fieldName": "avg(UtilizationRate)"
+                  }
+                ]
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 8,
+            "width": 6,
+            "height": 4
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "18f328bb",
+      "displayName": "Filter by Zone, Date, Hour & Fuel",
+      "layout": [
+        {
+          "widget": {
+            "name": "filter_zone",
+            "queries": [
+              {
+                "name": "dashboards/01f1a6eaaf2c1f879cd035010e457f36/datasets/01f1a6eaba5b18b390e30a16fba2b810_Zone",
+                "query": {
+                  "datasetName": "937071e1",
+                  "fields": [
+                    {
+                      "name": "Zone",
+                      "expression": "`Zone`"
+                    },
+                    {
+                      "name": "Zone_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "showTitle": true,
+                "title": "Zone"
+              },
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "Zone",
+                    "queryName": "dashboards/01f1a6eaaf2c1f879cd035010e457f36/datasets/01f1a6eaba5b18b390e30a16fba2b810_Zone"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "filter_date",
+            "queries": [
+              {
+                "name": "dashboards/01f1a6eaaf2c1f879cd035010e457f36/datasets/01f1a6eaba5b18b390e30a16fba2b810_datetime",
+                "query": {
+                  "datasetName": "937071e1",
+                  "fields": [
+                    {
+                      "name": "datetime",
+                      "expression": "`datetime`"
+                    },
+                    {
+                      "name": "datetime_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "showTitle": true,
+                "title": "Date Range"
+              },
+              "widgetType": "filter-date-range-picker",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "datetime",
+                    "queryName": "dashboards/01f1a6eaaf2c1f879cd035010e457f36/datasets/01f1a6eaba5b18b390e30a16fba2b810_datetime"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 0,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "filter_hour",
+            "queries": [
+              {
+                "name": "dashboards/01f1a6eaaf2c1f879cd035010e457f36/datasets/01f1a6eaba5b18b390e30a16fba2b810_Hour",
+                "query": {
+                  "datasetName": "937071e1",
+                  "fields": [
+                    {
+                      "name": "Hour",
+                      "expression": "`Hour`"
+                    },
+                    {
+                      "name": "Hour_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "showTitle": true,
+                "title": "Hour of Day"
+              },
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "Hour",
+                    "queryName": "dashboards/01f1a6eaaf2c1f879cd035010e457f36/datasets/01f1a6eaba5b18b390e30a16fba2b810_Hour"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 0,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "bar_zone_output",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "937071e1",
+                  "fields": [
+                    {
+                      "name": "Zone",
+                      "expression": "`Zone`"
+                    },
+                    {
+                      "name": "hourly(datetime)",
+                      "expression": "DATE_TRUNC(\"HOUR\", `datetime`)"
+                    },
+                    {
+                      "name": "avg(OutputMW)",
+                      "expression": "AVG(`OutputMW`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Output MW by Zone",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "hourly(datetime)",
+                  "displayName": "Zone",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "avg(OutputMW)",
+                  "displayName": "OutputMW",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "Zone",
+                  "displayName": "Zone",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 4,
+            "width": 6,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "line_hour_util",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "937071e1",
+                  "fields": [
+                    {
+                      "name": "Zone",
+                      "expression": "`Zone`"
+                    },
+                    {
+                      "name": "hourly(datetime)",
+                      "expression": "DATE_TRUNC(\"HOUR\", `datetime`)"
+                    },
+                    {
+                      "name": "avg(UtilizationRate)",
+                      "expression": "AVG(`UtilizationRate`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Utilization Rate by Hour",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "hourly(datetime)",
+                  "displayName": "Hour",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "avg(UtilizationRate)",
+                  "displayName": "UtilizationRate",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "Zone",
+                  "displayName": "Hour",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 4,
+            "width": 6,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "table_detail",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "937071e1",
+                  "fields": [
+                    {
+                      "name": "Zone",
+                      "expression": "`Zone`"
+                    },
+                    {
+                      "name": "FuelType",
+                      "expression": "`FuelType`"
+                    },
+                    {
+                      "name": "hourly(datetime)",
+                      "expression": "DATE_TRUNC(\"HOUR\", `datetime`)"
+                    },
+                    {
+                      "name": "sum(OutputMW)",
+                      "expression": "SUM(`OutputMW`)"
+                    },
+                    {
+                      "name": "sum(CapabilityMW)",
+                      "expression": "SUM(`CapabilityMW`)"
+                    },
+                    {
+                      "name": "sum(NumGenerators)",
+                      "expression": "SUM(`NumGenerators`)"
+                    },
+                    {
+                      "name": "avg(UtilizationRate)",
+                      "expression": "AVG(`UtilizationRate`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Generation Detail",
+                  "fields": []
+                }
+              },
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "Zone"
+                  },
+                  {
+                    "fieldName": "FuelType"
+                  },
+                  {
+                    "fieldName": "hourly(datetime)"
+                  },
+                  {
+                    "fieldName": "sum(OutputMW)"
+                  },
+                  {
+                    "fieldName": "sum(CapabilityMW)"
+                  },
+                  {
+                    "fieldName": "sum(NumGenerators)"
+                  },
+                  {
+                    "fieldName": "avg(UtilizationRate)"
+                  }
+                ]
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 8,
+            "width": 12,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "filter_fueltype",
+            "queries": [
+              {
+                "name": "dashboards/01f1a6eaaf2c1f879cd035010e457f36/datasets/01f1a6eaba5b18b390e30a16fba2b810_FuelType",
+                "query": {
+                  "datasetName": "937071e1",
+                  "fields": [
+                    {
+                      "name": "FuelType",
+                      "expression": "`FuelType`"
+                    },
+                    {
+                      "name": "FuelType_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Fuel Type",
+                  "fields": []
+                }
+              },
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "FuelType",
+                    "queryName": "dashboards/01f1a6eaaf2c1f879cd035010e457f36/datasets/01f1a6eaba5b18b390e30a16fba2b810_FuelType"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 12,
+            "height": 2
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    }
+  ],
+  "uiSettings": {
+    "theme": {
+      "widgetHeaderAlignment": "ALIGNMENT_UNSPECIFIED"
+    },
+    "applyModeEnabled": false
+  }
+}

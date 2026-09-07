@@ -1,0 +1,523 @@
+{
+  "datasets": [
+    {
+      "name": "ead14e7f",
+      "displayName": "load_forecast_7j",
+      "config": {
+        "version": "1.1",
+        "source": "workspace.energy_forecast.load_forecast_7j",
+        "dimensions": [
+          {
+            "expr": "source.*"
+          }
+        ],
+        "measures": [
+          {
+            "name": "count",
+            "expr": "COUNT(*)",
+            "comment": "Represents the total number of rows in the dataset. Use this measure to count all",
+            "displayName": "Count"
+          }
+        ]
+      }
+    },
+    {
+      "name": "1eab02cf",
+      "displayName": "load_shap_7j",
+      "config": {
+        "version": "1.1",
+        "source": "workspace.energy_forecast.load_shap_7j",
+        "dimensions": [
+          {
+            "expr": "source.*"
+          }
+        ],
+        "measures": [
+          {
+            "name": "count",
+            "expr": "COUNT(*)",
+            "comment": "Represents the total number of rows in the dataset. Use this measure to count all",
+            "displayName": "Count"
+          }
+        ]
+      }
+    },
+    {
+      "name": "6b5120fa",
+      "displayName": "load_forecast_24h",
+      "config": {
+        "version": "1.1",
+        "source": "workspace.energy_forecast.load_forecast_24h",
+        "dimensions": [
+          {
+            "expr": "source.*"
+          }
+        ],
+        "measures": [
+          {
+            "name": "count",
+            "expr": "COUNT(*)",
+            "comment": "Represents the total number of rows in the dataset. Use this measure to count all",
+            "displayName": "Count"
+          }
+        ]
+      }
+    },
+    {
+      "name": "e3ad2ff9",
+      "displayName": "load_shap_24h",
+      "config": {
+        "version": "1.1",
+        "source": "workspace.energy_forecast.load_shap_24h",
+        "dimensions": [
+          {
+            "expr": "source.*"
+          }
+        ],
+        "measures": [
+          {
+            "name": "count",
+            "expr": "COUNT(*)",
+            "comment": "Represents the total number of rows in the dataset. Use this measure to count all",
+            "displayName": "Count"
+          }
+        ]
+      }
+    }
+  ],
+  "relationshipGraphs": [
+    {
+      "sources": [
+        {
+          "name": "load_forecast_7j",
+          "datasetName": "ead14e7f"
+        },
+        {
+          "name": "load_shap_7j",
+          "datasetName": "1eab02cf"
+        },
+        {
+          "name": "load_forecast_24h",
+          "datasetName": "6b5120fa"
+        },
+        {
+          "name": "load_shap_24h",
+          "datasetName": "e3ad2ff9"
+        }
+      ],
+      "relationships": [
+        {
+          "name": "relationship_1",
+          "from": "load_forecast_7j",
+          "to": "load_shap_7j",
+          "on": "`load_forecast_7j`.`zone` = `load_shap_7j`.`zone` AND `load_forecast_7j`.`target_datetime` = `load_shap_7j`.`target_datetime` AND `load_forecast_7j`.`prediction_time` = `load_shap_7j`.`prediction_time`",
+          "cardinality": "CARDINALITY_ONE_TO_MANY"
+        }
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "demande_7j",
+      "displayName": "Demande 7 jours",
+      "layout": [
+        {
+          "widget": {
+            "name": "shap_7j",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "load_shap_7j__feature_name",
+                      "expression": "`load_shap_7j`.`feature_name`"
+                    },
+                    {
+                      "name": "avg(load_shap_7j__shap_value)",
+                      "expression": "AVG(`load_shap_7j`.`shap_value`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Valeurs SHAP - 7 jours"
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "load_shap_7j__feature_name",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "avg(load_shap_7j__shap_value)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 6,
+            "width": 12,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "3cc841b9",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "load_forecast_7j__target_datetime",
+                      "expression": "`load_forecast_7j`.`target_datetime`"
+                    },
+                    {
+                      "name": "load_forecast_7j__predicted_demand_mw",
+                      "expression": "`load_forecast_7j`.`predicted_demand_mw`"
+                    }
+                  ],
+                  "filters": [
+                    {
+                      "expression": "`load_forecast_7j`.`zone` IN ('Ontario')"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Demande Ontario - 7 jours"
+              },
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "load_forecast_7j__target_datetime",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "fieldName": "load_forecast_7j__predicted_demand_mw",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "62b6d480",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "load_forecast_7j__zone",
+                      "expression": "`load_forecast_7j`.`zone`"
+                    },
+                    {
+                      "name": "load_forecast_7j__target_datetime",
+                      "expression": "`load_forecast_7j`.`target_datetime`"
+                    },
+                    {
+                      "name": "sum(load_forecast_7j__predicted_demand_mw)",
+                      "expression": "SUM(`load_forecast_7j`.`predicted_demand_mw`)"
+                    }
+                  ],
+                  "filters": [
+                    {
+                      "expression": "`load_forecast_7j`.`zone` NOT IN ('Ontario')"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Demande autres zones - 7 jours",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "load_forecast_7j__target_datetime",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(load_forecast_7j__predicted_demand_mw)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "load_forecast_7j__zone",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 12,
+            "width": 12,
+            "height": 6
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "d3eb19dd",
+      "displayName": "Demande 24h",
+      "layout": [
+        {
+          "widget": {
+            "name": "ontario_demand",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "load_forecast_24h__zone",
+                      "expression": "`load_forecast_24h`.`zone`"
+                    },
+                    {
+                      "name": "load_forecast_24h__target_datetime",
+                      "expression": "`load_forecast_24h`.`target_datetime`"
+                    },
+                    {
+                      "name": "load_forecast_24h__predicted_demand_mw",
+                      "expression": "`load_forecast_24h`.`predicted_demand_mw`"
+                    }
+                  ],
+                  "filters": [
+                    {
+                      "expression": "`load_forecast_24h`.`zone` IN ('Ontario')"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Demande Ontario - 24h"
+              },
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "load_forecast_24h__target_datetime",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "fieldName": "load_forecast_24h__predicted_demand_mw",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "load_forecast_24h__zone",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "other_zones_demand",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "load_forecast_24h__zone",
+                      "expression": "`load_forecast_24h`.`zone`"
+                    },
+                    {
+                      "name": "load_forecast_24h__target_datetime",
+                      "expression": "`load_forecast_24h`.`target_datetime`"
+                    },
+                    {
+                      "name": "load_forecast_24h__predicted_demand_mw",
+                      "expression": "`load_forecast_24h`.`predicted_demand_mw`"
+                    }
+                  ],
+                  "filters": [
+                    {
+                      "expression": "`load_forecast_24h`.`zone` NOT IN ('Ontario')"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Demande autres zones - 24h",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "load_forecast_24h__target_datetime",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "fieldName": "load_forecast_24h__predicted_demand_mw",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "load_forecast_24h__zone",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 0,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "shap_values",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "load_shap_24h__feature_name",
+                      "expression": "`load_shap_24h`.`feature_name`"
+                    },
+                    {
+                      "name": "avg(load_shap_24h__shap_value)",
+                      "expression": "AVG(`load_shap_24h`.`shap_value`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Valeurs SHAP - 24h"
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "load_shap_24h__feature_name",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "avg(load_shap_24h__shap_value)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 6,
+            "width": 12,
+            "height": 6
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    }
+  ],
+  "uiSettings": {
+    "theme": {
+      "widgetHeaderAlignment": "ALIGNMENT_UNSPECIFIED"
+    },
+    "applyModeEnabled": false
+  }
+}
