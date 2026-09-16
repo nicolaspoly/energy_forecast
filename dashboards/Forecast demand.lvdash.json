@@ -1,0 +1,1884 @@
+{
+  "datasets": [
+    {
+      "name": "ead14e7f",
+      "displayName": "load_forecast_7j",
+      "config": {
+        "version": "1.1",
+        "source": "workspace.energy_forecast.load_forecast_7j",
+        "dimensions": [
+          {
+            "expr": "source.*"
+          }
+        ],
+        "measures": [
+          {
+            "name": "count",
+            "expr": "COUNT(*)",
+            "comment": "Represents the total number of rows in the dataset. Use this measure to count all",
+            "displayName": "Count"
+          }
+        ]
+      }
+    },
+    {
+      "name": "1eab02cf",
+      "displayName": "load_shap_7j",
+      "config": {
+        "version": "1.1",
+        "source": "workspace.energy_forecast.load_shap_7j",
+        "dimensions": [
+          {
+            "expr": "source.*"
+          }
+        ],
+        "measures": [
+          {
+            "name": "count",
+            "expr": "COUNT(*)",
+            "comment": "Represents the total number of rows in the dataset. Use this measure to count all",
+            "displayName": "Count"
+          }
+        ]
+      }
+    },
+    {
+      "name": "6b5120fa",
+      "displayName": "load_forecast_24h",
+      "config": {
+        "version": "1.1",
+        "source": "workspace.energy_forecast.load_forecast_24h",
+        "dimensions": [
+          {
+            "expr": "source.*"
+          }
+        ],
+        "measures": [
+          {
+            "name": "count",
+            "expr": "COUNT(*)",
+            "comment": "Represents the total number of rows in the dataset. Use this measure to count all",
+            "displayName": "Count"
+          }
+        ]
+      }
+    },
+    {
+      "name": "e3ad2ff9",
+      "displayName": "load_shap_24h",
+      "config": {
+        "version": "1.1",
+        "source": "workspace.energy_forecast.load_shap_24h",
+        "dimensions": [
+          {
+            "expr": "source.*"
+          }
+        ],
+        "measures": [
+          {
+            "name": "count",
+            "expr": "COUNT(*)",
+            "comment": "Represents the total number of rows in the dataset. Use this measure to count all",
+            "displayName": "Count"
+          }
+        ]
+      }
+    },
+    {
+      "name": "kpi_performance",
+      "displayName": "kpi_performance",
+      "config": {
+        "version": "1.1",
+        "source": "workspace.energy_forecast.model_performance_global",
+        "dimensions": [
+          {
+            "expr": "source.*"
+          }
+        ],
+        "measures": [
+          {
+            "name": "latest_mape",
+            "expr": "MAX(mape)",
+            "displayName": "MAPE actuel (%)"
+          },
+          {
+            "name": "latest_evaluation_time",
+            "expr": "MAX(evaluation_time)",
+            "displayName": "Dernière évaluation"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ontario_actual_vs_pred",
+      "displayName": "Ontario actual vs predicted",
+      "queryLines": [
+        "WITH latest_forecast AS (\n",
+        "  SELECT\n",
+        "    target_datetime,\n",
+        "    predicted_demand_mw,\n",
+        "    prediction_time\n",
+        "  FROM\n",
+        "    workspace.energy_forecast.load_forecast_7j\n",
+        "  WHERE\n",
+        "    zone = 'Ontario'\n",
+        "    AND prediction_time\n",
+        "      = (\n",
+        "        SELECT\n",
+        "          MAX(prediction_time)\n",
+        "        FROM\n",
+        "          workspace.energy_forecast.load_forecast_7j\n",
+        "        WHERE\n",
+        "          zone = 'Ontario'\n",
+        "      )\n",
+        "),\n",
+        "actuals AS (\n",
+        "  SELECT\n",
+        "    datetime AS target_datetime,\n",
+        "    demand_mw AS actual_demand_mw\n",
+        "  FROM\n",
+        "    workspace.energy_forecast_bronze.load_zonal\n",
+        "  WHERE\n",
+        "    zone = 'Ontario'\n",
+        "    AND datetime >= DATE_SUB(CURRENT_DATE(), 3)\n",
+        "),\n",
+        "time_range AS (\n",
+        "  SELECT\n",
+        "    LEAST(\n",
+        "      (\n",
+        "        SELECT\n",
+        "          MIN(target_datetime)\n",
+        "        FROM\n",
+        "          latest_forecast\n",
+        "      ),\n",
+        "      (\n",
+        "        SELECT\n",
+        "          MIN(target_datetime)\n",
+        "        FROM\n",
+        "          actuals\n",
+        "      )\n",
+        "    ) AS min_time,\n",
+        "    GREATEST(\n",
+        "      (\n",
+        "        SELECT\n",
+        "          MAX(target_datetime)\n",
+        "        FROM\n",
+        "          latest_forecast\n",
+        "      ),\n",
+        "      (\n",
+        "        SELECT\n",
+        "          MAX(target_datetime)\n",
+        "        FROM\n",
+        "          actuals\n",
+        "      )\n",
+        "    ) AS max_time\n",
+        ")\n",
+        "SELECT\n",
+        "  f.target_datetime,\n",
+        "  f.predicted_demand_mw AS demand_mw,\n",
+        "  'Prédiction' AS series_type\n",
+        "FROM\n",
+        "  latest_forecast f\n",
+        "UNION ALL\n",
+        "SELECT\n",
+        "  a.target_datetime,\n",
+        "  a.actual_demand_mw AS demand_mw,\n",
+        "  'Réel' AS series_type\n",
+        "FROM\n",
+        "  actuals a\n",
+        "ORDER BY\n",
+        "  target_datetime,\n",
+        "  series_type"
+      ]
+    },
+    {
+      "name": "shap_top15_7j",
+      "displayName": "SHAP Top 15 features - 7j",
+      "queryLines": [
+        "SELECT\n",
+        "  feature_name,\n",
+        "  AVG(ABS(shap_value)) AS avg_abs_shap_value\n",
+        "FROM\n",
+        "  workspace.energy_forecast.load_shap_7j\n",
+        "WHERE\n",
+        "  zone = 'Ontario'\n",
+        "  AND prediction_time\n",
+        "    = (\n",
+        "      SELECT\n",
+        "        MAX(prediction_time)\n",
+        "      FROM\n",
+        "        workspace.energy_forecast.load_shap_7j\n",
+        "      WHERE\n",
+        "        zone = 'Ontario'\n",
+        "    )\n",
+        "GROUP BY\n",
+        "  feature_name\n",
+        "ORDER BY\n",
+        "  avg_abs_shap_value DESC\n",
+        "LIMIT 15"
+      ]
+    },
+    {
+      "name": "daily_peak_trough",
+      "displayName": "Pics et creux quotidiens",
+      "queryLines": [
+        "WITH latest_forecast AS (\n",
+        "  SELECT\n",
+        "    target_datetime,\n",
+        "    predicted_demand_mw,\n",
+        "    prediction_time,\n",
+        "    DATE(target_datetime) AS target_date\n",
+        "  FROM\n",
+        "    workspace.energy_forecast.load_forecast_7j\n",
+        "  WHERE\n",
+        "    zone = 'Ontario'\n",
+        "    AND prediction_time\n",
+        "      = (\n",
+        "        SELECT\n",
+        "          MAX(prediction_time)\n",
+        "        FROM\n",
+        "          workspace.energy_forecast.load_forecast_7j\n",
+        "        WHERE\n",
+        "          zone = 'Ontario'\n",
+        "      )\n",
+        "),\n",
+        "daily_stats AS (\n",
+        "  SELECT\n",
+        "    target_date,\n",
+        "    MAX(predicted_demand_mw) AS peak_demand_mw,\n",
+        "    MIN(predicted_demand_mw) AS trough_demand_mw,\n",
+        "    AVG(predicted_demand_mw) AS avg_demand_mw,\n",
+        "    MAX(predicted_demand_mw) - MIN(predicted_demand_mw) AS amplitude_mw\n",
+        "  FROM\n",
+        "    latest_forecast\n",
+        "  GROUP BY\n",
+        "    target_date\n",
+        "),\n",
+        "peak_times AS (\n",
+        "  SELECT\n",
+        "    f.target_date,\n",
+        "    MIN(f.target_datetime) AS peak_time\n",
+        "  FROM\n",
+        "    latest_forecast f\n",
+        "      INNER JOIN daily_stats ds\n",
+        "        ON f.target_date = ds.target_date\n",
+        "        AND f.predicted_demand_mw = ds.peak_demand_mw\n",
+        "  GROUP BY\n",
+        "    f.target_date\n",
+        "),\n",
+        "trough_times AS (\n",
+        "  SELECT\n",
+        "    f.target_date,\n",
+        "    MIN(f.target_datetime) AS trough_time\n",
+        "  FROM\n",
+        "    latest_forecast f\n",
+        "      INNER JOIN daily_stats ds\n",
+        "        ON f.target_date = ds.target_date\n",
+        "        AND f.predicted_demand_mw = ds.trough_demand_mw\n",
+        "  GROUP BY\n",
+        "    f.target_date\n",
+        ")\n",
+        "SELECT\n",
+        "  ds.target_date,\n",
+        "  ds.peak_demand_mw,\n",
+        "  pt.peak_time,\n",
+        "  HOUR(pt.peak_time) AS peak_hour,\n",
+        "  ds.trough_demand_mw,\n",
+        "  tt.trough_time,\n",
+        "  HOUR(tt.trough_time) AS trough_hour,\n",
+        "  ds.avg_demand_mw,\n",
+        "  ds.amplitude_mw,\n",
+        "  ROUND(ds.amplitude_mw / ds.avg_demand_mw * 100, 2) AS amplitude_pct\n",
+        "FROM\n",
+        "  daily_stats ds\n",
+        "    INNER JOIN peak_times pt\n",
+        "      ON ds.target_date = pt.target_date\n",
+        "    INNER JOIN trough_times tt\n",
+        "      ON ds.target_date = tt.target_date\n",
+        "ORDER BY\n",
+        "  ds.target_date"
+      ]
+    },
+    {
+      "name": "peak_trough_series",
+      "displayName": "Séries pics et creux",
+      "queryLines": [
+        "WITH latest_forecast AS (\n",
+        "  SELECT\n",
+        "    target_datetime,\n",
+        "    predicted_demand_mw,\n",
+        "    prediction_time,\n",
+        "    DATE(target_datetime) AS target_date\n",
+        "  FROM\n",
+        "    workspace.energy_forecast.load_forecast_7j\n",
+        "  WHERE\n",
+        "    zone = 'Ontario'\n",
+        "    AND prediction_time\n",
+        "      = (\n",
+        "        SELECT\n",
+        "          MAX(prediction_time)\n",
+        "        FROM\n",
+        "          workspace.energy_forecast.load_forecast_7j\n",
+        "        WHERE\n",
+        "          zone = 'Ontario'\n",
+        "      )\n",
+        "),\n",
+        "daily_stats AS (\n",
+        "  SELECT\n",
+        "    target_date,\n",
+        "    MAX(predicted_demand_mw) AS peak_demand_mw,\n",
+        "    MIN(predicted_demand_mw) AS trough_demand_mw,\n",
+        "    AVG(predicted_demand_mw) AS avg_demand_mw\n",
+        "  FROM\n",
+        "    latest_forecast\n",
+        "  GROUP BY\n",
+        "    target_date\n",
+        ")\n",
+        "SELECT\n",
+        "  target_date,\n",
+        "  'Pic' AS type_demande,\n",
+        "  peak_demand_mw AS demand_mw\n",
+        "FROM\n",
+        "  daily_stats\n",
+        "UNION ALL\n",
+        "SELECT\n",
+        "  target_date,\n",
+        "  'Creux' AS type_demande,\n",
+        "  trough_demand_mw AS demand_mw\n",
+        "FROM\n",
+        "  daily_stats\n",
+        "ORDER BY\n",
+        "  target_date,\n",
+        "  type_demande"
+      ]
+    },
+    {
+      "name": "hourly_forecast",
+      "displayName": "Prévisions horaires",
+      "config": {
+        "version": "1.1",
+        "source": "SELECT * FROM workspace.energy_forecast.load_forecast_7j  WHERE zone = 'Ontario'\n",
+        "dimensions": [
+          {
+            "name": "target_datetime",
+            "expr": "target_datetime",
+            "displayName": "Heure"
+          },
+          {
+            "name": "hour_of_day",
+            "expr": "HOUR(target_datetime)",
+            "displayName": "Heure de la journée"
+          }
+        ],
+        "measures": [
+          {
+            "name": "predicted_demand_mw",
+            "expr": "SUM(predicted_demand_mw)",
+            "displayName": "Demande prévue (MW)"
+          }
+        ]
+      }
+    },
+    {
+      "name": "peak_trough_hours",
+      "displayName": "Distribution heures pics/creux",
+      "queryLines": [
+        "WITH daily_peak_trough AS (\n",
+        "  WITH latest_forecast AS (\n",
+        "    SELECT\n",
+        "      target_datetime,\n",
+        "      predicted_demand_mw,\n",
+        "      prediction_time,\n",
+        "      DATE(target_datetime) AS target_date\n",
+        "    FROM\n",
+        "      workspace.energy_forecast.load_forecast_7j\n",
+        "    WHERE\n",
+        "      zone = 'Ontario'\n",
+        "      AND prediction_time\n",
+        "        = (\n",
+        "          SELECT\n",
+        "            MAX(prediction_time)\n",
+        "          FROM\n",
+        "            workspace.energy_forecast.load_forecast_7j\n",
+        "          WHERE\n",
+        "            zone = 'Ontario'\n",
+        "        )\n",
+        "  ),\n",
+        "  daily_stats AS (\n",
+        "    SELECT\n",
+        "      target_date,\n",
+        "      MAX(predicted_demand_mw) AS peak_demand_mw,\n",
+        "      MIN(predicted_demand_mw) AS trough_demand_mw\n",
+        "    FROM\n",
+        "      latest_forecast\n",
+        "    GROUP BY\n",
+        "      target_date\n",
+        "  ),\n",
+        "  peak_times AS (\n",
+        "    SELECT\n",
+        "      f.target_date,\n",
+        "      MIN(f.target_datetime) AS peak_time\n",
+        "    FROM\n",
+        "      latest_forecast f\n",
+        "        INNER JOIN daily_stats ds\n",
+        "          ON f.target_date = ds.target_date\n",
+        "          AND f.predicted_demand_mw = ds.peak_demand_mw\n",
+        "    GROUP BY\n",
+        "      f.target_date\n",
+        "  ),\n",
+        "  trough_times AS (\n",
+        "    SELECT\n",
+        "      f.target_date,\n",
+        "      MIN(f.target_datetime) AS trough_time\n",
+        "    FROM\n",
+        "      latest_forecast f\n",
+        "        INNER JOIN daily_stats ds\n",
+        "          ON f.target_date = ds.target_date\n",
+        "          AND f.predicted_demand_mw = ds.trough_demand_mw\n",
+        "    GROUP BY\n",
+        "      f.target_date\n",
+        "  )\n",
+        "  SELECT\n",
+        "    HOUR(pt.peak_time) AS peak_hour,\n",
+        "    HOUR(tt.trough_time) AS trough_hour\n",
+        "  FROM\n",
+        "    daily_stats ds\n",
+        "      INNER JOIN peak_times pt\n",
+        "        ON ds.target_date = pt.target_date\n",
+        "      INNER JOIN trough_times tt\n",
+        "        ON ds.target_date = tt.target_date\n",
+        ")\n",
+        "SELECT\n",
+        "  'Pic' as type_demande,\n",
+        "  peak_hour as hour_value\n",
+        "FROM\n",
+        "  daily_peak_trough\n",
+        "WHERE\n",
+        "  peak_hour IS NOT NULL\n",
+        "UNION ALL\n",
+        "SELECT\n",
+        "  'Creux' as type_demande,\n",
+        "  trough_hour as hour_value\n",
+        "FROM\n",
+        "  daily_peak_trough\n",
+        "WHERE\n",
+        "  trough_hour IS NOT NULL"
+      ]
+    },
+    {
+      "name": "shap_top15_24h",
+      "displayName": "SHAP Top 15 features - 24h",
+      "queryLines": [
+        "WITH ranked_features AS (\n",
+        "  SELECT\n",
+        "    feature_name,\n",
+        "    AVG(ABS(shap_value)) as avg_abs_shap_value,\n",
+        "    ROW_NUMBER() OVER (ORDER BY AVG(ABS(shap_value)) DESC) as rank\n",
+        "  FROM\n",
+        "    workspace.energy_forecast.load_shap_24h\n",
+        "  GROUP BY\n",
+        "    feature_name\n",
+        ")\n",
+        "SELECT\n",
+        "  feature_name,\n",
+        "  avg_abs_shap_value\n",
+        "FROM\n",
+        "  ranked_features\n",
+        "WHERE\n",
+        "  rank <= 15\n",
+        "ORDER BY\n",
+        "  avg_abs_shap_value DESC"
+      ]
+    },
+    {
+      "name": "shap_peak_trough",
+      "displayName": "Valeurs SHAP pics et creux",
+      "queryLines": [
+        "WITH daily_peaks_troughs AS (\n",
+        "  SELECT\n",
+        "    DATE(target_datetime) as target_date,\n",
+        "    MAX(\n",
+        "      CASE\n",
+        "        WHEN predicted_demand_mw = max_demand THEN target_datetime\n",
+        "      END\n",
+        "    ) as peak_datetime,\n",
+        "    MAX(\n",
+        "      CASE\n",
+        "        WHEN predicted_demand_mw = min_demand THEN target_datetime\n",
+        "      END\n",
+        "    ) as trough_datetime\n",
+        "  FROM\n",
+        "    workspace.energy_forecast.load_forecast_7j\n",
+        "      CROSS JOIN (\n",
+        "        SELECT\n",
+        "          DATE(target_datetime) as dt,\n",
+        "          MAX(predicted_demand_mw) as max_demand,\n",
+        "          MIN(predicted_demand_mw) as min_demand\n",
+        "        FROM\n",
+        "          workspace.energy_forecast.load_forecast_7j\n",
+        "        WHERE\n",
+        "          zone = 'Ontario'\n",
+        "        GROUP BY\n",
+        "          DATE(target_datetime)\n",
+        "      ) daily_stats\n",
+        "  WHERE\n",
+        "    DATE(target_datetime) = dt\n",
+        "    AND zone = 'Ontario'\n",
+        "  GROUP BY\n",
+        "    DATE(target_datetime)\n",
+        "),\n",
+        "peak_shap AS (\n",
+        "  SELECT\n",
+        "    'Pic' as type_demande,\n",
+        "    s.feature_name,\n",
+        "    AVG(s.shap_value) as avg_shap_value,\n",
+        "    AVG(ABS(s.shap_value)) as avg_abs_shap_value\n",
+        "  FROM\n",
+        "    workspace.energy_forecast.load_shap_7j s\n",
+        "      INNER JOIN daily_peaks_troughs pt\n",
+        "        ON s.target_datetime = pt.peak_datetime\n",
+        "  WHERE\n",
+        "    s.zone = 'Ontario'\n",
+        "  GROUP BY\n",
+        "    s.feature_name\n",
+        "),\n",
+        "trough_shap AS (\n",
+        "  SELECT\n",
+        "    'Creux' as type_demande,\n",
+        "    s.feature_name,\n",
+        "    AVG(s.shap_value) as avg_shap_value,\n",
+        "    AVG(ABS(s.shap_value)) as avg_abs_shap_value\n",
+        "  FROM\n",
+        "    workspace.energy_forecast.load_shap_7j s\n",
+        "      INNER JOIN daily_peaks_troughs pt\n",
+        "        ON s.target_datetime = pt.trough_datetime\n",
+        "  WHERE\n",
+        "    s.zone = 'Ontario'\n",
+        "  GROUP BY\n",
+        "    s.feature_name\n",
+        ")\n",
+        "SELECT\n",
+        "  *\n",
+        "FROM\n",
+        "  peak_shap\n",
+        "UNION ALL\n",
+        "SELECT\n",
+        "  *\n",
+        "FROM\n",
+        "  trough_shap\n",
+        "ORDER BY\n",
+        "  type_demande,\n",
+        "  avg_abs_shap_value DESC"
+      ]
+    },
+    {
+      "name": "peak_consumption",
+      "displayName": "Pic de consommation",
+      "queryLines": [
+        "SELECT\n",
+        "  target_datetime AS peak_datetime,\n",
+        "  demand_mw AS peak_value\n",
+        "FROM\n",
+        "  workspace.energy_forecast.ontario_actual_vs_pred\n",
+        "WHERE\n",
+        "  demand_mw\n",
+        "    = (\n",
+        "      SELECT\n",
+        "        MAX(demand_mw)\n",
+        "      FROM\n",
+        "        workspace.energy_forecast.ontario_actual_vs_pred\n",
+        "    )\n",
+        "LIMIT 1"
+      ]
+    },
+    {
+      "name": "shap_diff_pic_creux",
+      "displayName": "Différences SHAP Pic vs Creux",
+      "queryLines": [
+        "WITH daily_peaks_troughs AS (\n",
+        "  SELECT\n",
+        "    DATE(target_datetime) as target_date,\n",
+        "    MAX(\n",
+        "      CASE\n",
+        "        WHEN predicted_demand_mw = max_demand THEN target_datetime\n",
+        "      END\n",
+        "    ) as peak_datetime,\n",
+        "    MAX(\n",
+        "      CASE\n",
+        "        WHEN predicted_demand_mw = min_demand THEN target_datetime\n",
+        "      END\n",
+        "    ) as trough_datetime\n",
+        "  FROM\n",
+        "    workspace.energy_forecast.load_forecast_7j\n",
+        "      CROSS JOIN (\n",
+        "        SELECT\n",
+        "          DATE(target_datetime) as dt,\n",
+        "          MAX(predicted_demand_mw) as max_demand,\n",
+        "          MIN(predicted_demand_mw) as min_demand\n",
+        "        FROM\n",
+        "          workspace.energy_forecast.load_forecast_7j\n",
+        "        WHERE\n",
+        "          zone = 'Ontario'\n",
+        "        GROUP BY\n",
+        "          DATE(target_datetime)\n",
+        "      ) daily_stats\n",
+        "  WHERE\n",
+        "    DATE(target_datetime) = dt\n",
+        "    AND zone = 'Ontario'\n",
+        "  GROUP BY\n",
+        "    DATE(target_datetime)\n",
+        "),\n",
+        "peak_shap AS (\n",
+        "  SELECT\n",
+        "    s.feature_name,\n",
+        "    AVG(s.shap_value) as shap_pic\n",
+        "  FROM\n",
+        "    workspace.energy_forecast.load_shap_7j s\n",
+        "      INNER JOIN daily_peaks_troughs pt\n",
+        "        ON s.target_datetime = pt.peak_datetime\n",
+        "  WHERE\n",
+        "    s.zone = 'Ontario'\n",
+        "  GROUP BY\n",
+        "    s.feature_name\n",
+        "),\n",
+        "trough_shap AS (\n",
+        "  SELECT\n",
+        "    s.feature_name,\n",
+        "    AVG(s.shap_value) as shap_creux\n",
+        "  FROM\n",
+        "    workspace.energy_forecast.load_shap_7j s\n",
+        "      INNER JOIN daily_peaks_troughs pt\n",
+        "        ON s.target_datetime = pt.trough_datetime\n",
+        "  WHERE\n",
+        "    s.zone = 'Ontario'\n",
+        "  GROUP BY\n",
+        "    s.feature_name\n",
+        ")\n",
+        "SELECT\n",
+        "  p.feature_name,\n",
+        "  p.shap_pic,\n",
+        "  t.shap_creux,\n",
+        "  (p.shap_pic - t.shap_creux) as shap_diff,\n",
+        "  ABS(p.shap_pic - t.shap_creux) as abs_shap_diff\n",
+        "FROM\n",
+        "  peak_shap p\n",
+        "    INNER JOIN trough_shap t\n",
+        "      ON p.feature_name = t.feature_name\n",
+        "ORDER BY\n",
+        "  abs_shap_diff DESC"
+      ]
+    }
+  ],
+  "relationshipGraphs": [
+    {
+      "sources": [
+        {
+          "name": "load_forecast_7j",
+          "datasetName": "ead14e7f"
+        },
+        {
+          "name": "load_shap_7j",
+          "datasetName": "1eab02cf"
+        },
+        {
+          "name": "load_forecast_24h",
+          "datasetName": "6b5120fa"
+        },
+        {
+          "name": "load_shap_24h",
+          "datasetName": "e3ad2ff9"
+        },
+        {
+          "name": "kpi_performance",
+          "datasetName": "kpi_performance"
+        },
+        {
+          "name": "ontario_actual_vs_pred",
+          "datasetName": "ontario_actual_vs_pred"
+        },
+        {
+          "name": "SHAP_Top_15_features__7j",
+          "datasetName": "shap_top15_7j"
+        },
+        {
+          "name": "Pics_et_creux_quotidiens",
+          "datasetName": "daily_peak_trough"
+        },
+        {
+          "name": "Sries_pics_et_creux",
+          "datasetName": "peak_trough_series"
+        },
+        {
+          "name": "Prvisions_horaires",
+          "datasetName": "hourly_forecast"
+        },
+        {
+          "name": "Distribution_heures_picscreux",
+          "datasetName": "peak_trough_hours"
+        },
+        {
+          "name": "SHAP_Top_15_features__24h",
+          "datasetName": "shap_top15_24h"
+        },
+        {
+          "name": "Valeurs_SHAP_pics_et_creux",
+          "datasetName": "shap_peak_trough"
+        },
+        {
+          "name": "Pic_de_consommation",
+          "datasetName": "peak_consumption"
+        },
+        {
+          "name": "Diffrences_SHAP_Pic_vs_Creux",
+          "datasetName": "shap_diff_pic_creux"
+        }
+      ],
+      "relationships": [
+        {
+          "name": "relationship_0",
+          "from": "load_forecast_7j",
+          "to": "load_shap_7j",
+          "on": "`load_forecast_7j`.`zone` = `load_shap_7j`.`zone` AND `load_forecast_7j`.`target_datetime` = `load_shap_7j`.`target_datetime` AND `load_forecast_7j`.`prediction_time` = `load_shap_7j`.`prediction_time`",
+          "cardinality": "CARDINALITY_ONE_TO_MANY"
+        }
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "demande_7j",
+      "displayName": "Demande 7 jours",
+      "layout": [
+        {
+          "widget": {
+            "name": "3cc841b9",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "ontario_actual_vs_pred__series_type",
+                      "expression": "`ontario_actual_vs_pred`.`series_type`"
+                    },
+                    {
+                      "name": "ontario_actual_vs_pred__target_datetime",
+                      "expression": "`ontario_actual_vs_pred`.`target_datetime`"
+                    },
+                    {
+                      "name": "ontario_actual_vs_pred__demand_mw",
+                      "expression": "`ontario_actual_vs_pred`.`demand_mw`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Demande Ontario - 7 jours",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "ontario_actual_vs_pred__target_datetime",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "fieldName": "ontario_actual_vs_pred__demand_mw",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "ontario_actual_vs_pred__series_type",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 12,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "62b6d480",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "load_forecast_7j__zone",
+                      "expression": "`load_forecast_7j`.`zone`"
+                    },
+                    {
+                      "name": "load_forecast_7j__target_datetime",
+                      "expression": "`load_forecast_7j`.`target_datetime`"
+                    },
+                    {
+                      "name": "load_forecast_7j__predicted_demand_mw",
+                      "expression": "`load_forecast_7j`.`predicted_demand_mw`"
+                    }
+                  ],
+                  "filters": [
+                    {
+                      "expression": "`load_forecast_7j`.`zone` NOT IN ('Ontario')"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Demande autres zones - 7 jours",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "load_forecast_7j__target_datetime",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "fieldName": "load_forecast_7j__predicted_demand_mw",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "load_forecast_7j__zone",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 15,
+            "width": 12,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "page_subtitle",
+            "multilineTextboxSpec": {
+              "lines": [
+                "**Prévisions de demande électrique sur 7 jours (168h)** | Mise à jour automatique toutes les heures | Source: IESO Ontario & Open-Meteo"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "shap_top15",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "sum(SHAP_Top_15_features__7j__avg_abs_shap_value)",
+                      "expression": "SUM(`SHAP_Top_15_features__7j`.`avg_abs_shap_value`)"
+                    },
+                    {
+                      "name": "SHAP_Top_15_features__7j__feature_name",
+                      "expression": "`SHAP_Top_15_features__7j`.`feature_name`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Top 15 features SHAP - 7 jours",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "SHAP_Top_15_features__7j__feature_name",
+                  "displayName": "feature_name",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "y-reversed"
+                    }
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(SHAP_Top_15_features__7j__avg_abs_shap_value)",
+                  "displayName": "avg_abs_shap_value",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "sum(SHAP_Top_15_features__7j__avg_abs_shap_value)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 9,
+            "width": 12,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "date-des-predictions",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "hourly(load_forecast_7j__prediction_time)",
+                      "expression": "DATE_TRUNC(\"HOUR\", `load_forecast_7j`.`prediction_time`)"
+                    }
+                  ],
+                  "disaggregated": false,
+                  "orders": [
+                    {
+                      "direction": "DESC",
+                      "expression": "DATE_TRUNC(\"HOUR\", `load_forecast_7j`.`prediction_time`)"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Date des prédictions"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "period": {
+                  "fieldName": "hourly(load_forecast_7j__prediction_time)"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 1,
+            "width": 4,
+            "height": 2
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "perfs_24h",
+      "displayName": "Demande 24h",
+      "layout": [
+        {
+          "widget": {
+            "name": "page_subtitle",
+            "multilineTextboxSpec": {
+              "lines": [
+                "**Prévisions de demande électrique sur 24 heures** | Mise à jour automatique toutes les heures | Source: IESO Ontario & Open-Meteo"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_mape",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "hourly(load_forecast_24h__prediction_time)",
+                      "expression": "DATE_TRUNC(\"HOUR\", `load_forecast_24h`.`prediction_time`)"
+                    }
+                  ],
+                  "disaggregated": false,
+                  "orders": [
+                    {
+                      "direction": "DESC",
+                      "expression": "DATE_TRUNC(\"HOUR\", `load_forecast_24h`.`prediction_time`)"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Date des prédictions",
+                  "fields": []
+                }
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "period": {
+                  "fieldName": "hourly(load_forecast_24h__prediction_time)"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 1,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "ontario_demand",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "load_forecast_24h__zone",
+                      "expression": "`load_forecast_24h`.`zone`"
+                    },
+                    {
+                      "name": "load_forecast_24h__target_datetime",
+                      "expression": "`load_forecast_24h`.`target_datetime`"
+                    },
+                    {
+                      "name": "sum(load_forecast_24h__predicted_demand_mw)",
+                      "expression": "SUM(`load_forecast_24h`.`predicted_demand_mw`)"
+                    }
+                  ],
+                  "filters": [
+                    {
+                      "expression": "`load_forecast_24h`.`zone` IN ('Ontario')"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Demande Ontario - 24h (cliquez pour filtrer)",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "load_forecast_24h__target_datetime",
+                  "displayName": "target_datetime",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(load_forecast_24h__predicted_demand_mw)",
+                  "displayName": "predicted_demand_mw",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "load_forecast_24h__zone",
+                  "displayName": "zone",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 12,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "other_zones_demand",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "load_forecast_24h__zone",
+                      "expression": "`load_forecast_24h`.`zone`"
+                    },
+                    {
+                      "name": "load_forecast_24h__target_datetime",
+                      "expression": "`load_forecast_24h`.`target_datetime`"
+                    },
+                    {
+                      "name": "sum(load_forecast_24h__predicted_demand_mw)",
+                      "expression": "SUM(`load_forecast_24h`.`predicted_demand_mw`)"
+                    }
+                  ],
+                  "filters": [
+                    {
+                      "expression": "`load_forecast_24h`.`zone` NOT IN ('Ontario')"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Demande autres zones - 24h",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "load_forecast_24h__target_datetime",
+                  "displayName": "target_datetime",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(load_forecast_24h__predicted_demand_mw)",
+                  "displayName": "predicted_demand_mw",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "load_forecast_24h__zone",
+                  "displayName": "zone",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 15,
+            "width": 12,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "effa8bcc",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "load_shap_24h__feature_name",
+                      "expression": "`load_shap_24h`.`feature_name`"
+                    },
+                    {
+                      "name": "load_shap_24h__shap_value",
+                      "expression": "`load_shap_24h`.`shap_value`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "load_shap_24h__feature_name",
+                  "scale": {
+                    "type": "categorical",
+                    "categorySize": {
+                      "type": "number-of-categories",
+                      "number": 10
+                    },
+                    "sort": {
+                      "by": "y"
+                    }
+                  }
+                },
+                "y": {
+                  "fieldName": "load_shap_24h__shap_value",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 9,
+            "width": 12,
+            "height": 6
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "pics_creux_7j",
+      "displayName": "Pics & Creux 7j",
+      "layout": [
+        {
+          "widget": {
+            "name": "header",
+            "multilineTextboxSpec": {
+              "lines": [
+                "**Analyse des pics et creux de demande** | Forecast Ontario 7 jours | Mise à jour automatique"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "avg_peak",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "avg(Pics_et_creux_quotidiens__peak_demand_mw)",
+                      "expression": "AVG(`Pics_et_creux_quotidiens`.`peak_demand_mw`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Pic moyen (MW)"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "avg(Pics_et_creux_quotidiens__peak_demand_mw)",
+                  "rowNumber": 0
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 1,
+            "width": 3,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "avg_trough",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "avg(Pics_et_creux_quotidiens__trough_demand_mw)",
+                      "expression": "AVG(`Pics_et_creux_quotidiens`.`trough_demand_mw`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Creux moyen (MW)"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "avg(Pics_et_creux_quotidiens__trough_demand_mw)",
+                  "rowNumber": 0
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 1,
+            "width": 3,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "avg_amplitude",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "avg(Pics_et_creux_quotidiens__amplitude_mw)",
+                      "expression": "AVG(`Pics_et_creux_quotidiens`.`amplitude_mw`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Amplitude moyenne (MW)"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "avg(Pics_et_creux_quotidiens__amplitude_mw)",
+                  "rowNumber": 0
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 1,
+            "width": 3,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "avg_amplitude_pct",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "avg(Pics_et_creux_quotidiens__amplitude_pct)",
+                      "expression": "AVG(`Pics_et_creux_quotidiens`.`amplitude_pct`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Amplitude moyenne (%)"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "avg(Pics_et_creux_quotidiens__amplitude_pct)",
+                  "rowNumber": 0
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 9,
+            "y": 1,
+            "width": 3,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "peak_hour_dist",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "Distribution_heures_picscreux__type_demande",
+                      "expression": "`Distribution_heures_picscreux`.`type_demande`"
+                    },
+                    {
+                      "name": "Distribution_heures_picscreux__hour_value",
+                      "expression": "`Distribution_heures_picscreux`.`hour_value`"
+                    },
+                    {
+                      "name": "count(Distribution_heures_picscreux__hour_value)",
+                      "expression": "COUNT(`Distribution_heures_picscreux`.`hour_value`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Distribution pics et creux (00h)",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "mark": {
+                "marker": {
+                  "shape": "circle"
+                }
+              },
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "Distribution_heures_picscreux__hour_value",
+                  "displayName": "Heure",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "y": {
+                  "fieldName": "count(Distribution_heures_picscreux__hour_value)",
+                  "displayName": "Nombre de jours",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "Distribution_heures_picscreux__type_demande",
+                  "displayName": "Type",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 12,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "avg_peak_hour",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "avg(Pics_et_creux_quotidiens__peak_hour)",
+                      "expression": "AVG(`Pics_et_creux_quotidiens`.`peak_hour`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Heure moyenne du pic",
+                  "fields": []
+                }
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "avg(Pics_et_creux_quotidiens__peak_hour)",
+                  "rowNumber": 0
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 10,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "avg_trough_hour",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "avg(Pics_et_creux_quotidiens__trough_hour)",
+                      "expression": "AVG(`Pics_et_creux_quotidiens`.`trough_hour`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Heure moyenne du creux"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "avg(Pics_et_creux_quotidiens__trough_hour)",
+                  "rowNumber": 0
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 10,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "section_patterns",
+            "multilineTextboxSpec": {
+              "lines": [
+                "### Patterns temporels\n",
+                "\n",
+                "Analyse des heures caractéristiques des pics et creux de demande\n",
+                "<p>&nbsp;</p>\n"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 8,
+            "width": 12,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "peak_trough_by_type",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "Sries_pics_et_creux__type_demande",
+                      "expression": "`Sries_pics_et_creux`.`type_demande`"
+                    },
+                    {
+                      "name": "Sries_pics_et_creux__target_date",
+                      "expression": "`Sries_pics_et_creux`.`target_date`"
+                    },
+                    {
+                      "name": "sum(Sries_pics_et_creux__demand_mw)",
+                      "expression": "SUM(`Sries_pics_et_creux`.`demand_mw`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Pics et creux par jour"
+              },
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "Sries_pics_et_creux__target_date",
+                  "displayName": "target_date",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(Sries_pics_et_creux__demand_mw)",
+                  "displayName": "demand_mw",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "Sries_pics_et_creux__type_demande",
+                  "displayName": "type_demande",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 11,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "shap_discriminant_features",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "fields": [
+                    {
+                      "name": "Diffrences_SHAP_Pic_vs_Creux__feature_name",
+                      "expression": "`Diffrences_SHAP_Pic_vs_Creux`.`feature_name`"
+                    },
+                    {
+                      "name": "avg(Diffrences_SHAP_Pic_vs_Creux__shap_pic)",
+                      "expression": "AVG(`Diffrences_SHAP_Pic_vs_Creux`.`shap_pic`)"
+                    },
+                    {
+                      "name": "avg(Diffrences_SHAP_Pic_vs_Creux__shap_creux)",
+                      "expression": "AVG(`Diffrences_SHAP_Pic_vs_Creux`.`shap_creux`)"
+                    },
+                    {
+                      "name": "avg(Diffrences_SHAP_Pic_vs_Creux__shap_diff)",
+                      "expression": "AVG(`Diffrences_SHAP_Pic_vs_Creux`.`shap_diff`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {},
+              "version": 1,
+              "mark": {
+                "layout": "group"
+              },
+              "widgetType": "combo",
+              "encodings": {
+                "x": {
+                  "fieldName": "Diffrences_SHAP_Pic_vs_Creux__feature_name",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "primary": {
+                    "fields": [
+                      {
+                        "fieldName": "avg(Diffrences_SHAP_Pic_vs_Creux__shap_pic)"
+                      },
+                      {
+                        "fieldName": "avg(Diffrences_SHAP_Pic_vs_Creux__shap_creux)"
+                      }
+                    ],
+                    "scale": {
+                      "type": "quantitative"
+                    }
+                  },
+                  "secondary": {
+                    "fields": [
+                      {
+                        "fieldName": "avg(Diffrences_SHAP_Pic_vs_Creux__shap_diff)"
+                      }
+                    ],
+                    "scale": {
+                      "type": "quantitative"
+                    }
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 20,
+            "width": 12,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "filter_shap_diff",
+            "queries": [
+              {
+                "name": "dashboards/01f1a6ea42aa1746afbf35121ebbffbc/datasets/ee138fb137d24e3b95e8490194655dc4_abs_shap_diff",
+                "query": {
+                  "datasetName": "shap_diff_pic_creux",
+                  "fields": [
+                    {
+                      "name": "min(abs_shap_diff)",
+                      "expression": "MIN(`abs_shap_diff`)"
+                    },
+                    {
+                      "name": "max(abs_shap_diff)",
+                      "expression": "MAX(`abs_shap_diff`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Filtre: Différence SHAP",
+                  "fields": []
+                }
+              },
+              "widgetType": "range-slider",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "abs_shap_diff",
+                    "queryName": "dashboards/01f1a6ea42aa1746afbf35121ebbffbc/datasets/ee138fb137d24e3b95e8490194655dc4_abs_shap_diff"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 18,
+            "width": 12,
+            "height": 2
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    }
+  ],
+  "uiSettings": {
+    "theme": {
+      "widgetHeaderAlignment": "ALIGNMENT_UNSPECIFIED"
+    },
+    "applyModeEnabled": false
+  }
+}

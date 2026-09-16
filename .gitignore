@@ -1,0 +1,31 @@
+# Databricks
+.db_internal/
+mlruns/
+*.ipynb_checkpoints/
+__pycache__/
+*.pyc
+*.pyo
+
+# Python
+*.egg-info/
+dist/
+build/
+venv/
+.venv/
+
+# Data & exports (ne pas versionner les données brutes)
+data/archive/*.csv
+data/exports/*.csv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
