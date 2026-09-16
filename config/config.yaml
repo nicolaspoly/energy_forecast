@@ -1,0 +1,248 @@
+# ==================================================================================
+# CONFIGURATION GLOBALE - PROJET PRÉVISION DEMANDE ÉLECTRIQUE ONTARIO
+# ==================================================================================
+# NOTE (nettoyage 2026-08-29): les noms de tables ci-dessous ont été alignés sur
+# ceux réellement utilisés dans pipeline/*.py (ils avaient dérivé de ce fichier
+# au fil des itérations). Le modèle unique a été scindé en deux configurations
+# MLflow distinctes (24h / 7 jours) : voir section `models` plus bas.
+
+project:
+  name: "ontario_demand_forecast"
+  version: "1.1.0"
+  description: "Prévision demande électrique Ontario zonale, horizons 24h et 7 jours (168h)"
+  author: "Energy Forecast Team"
+  timezone: "America/Toronto"
+
+# ==================================================================================
+# UNITY CATALOG - TABLES
+# ==================================================================================
+catalog:
+  name: "workspace"  # Catalog UC Databricks
+  schema: "energy_forecast"
+
+  tables:
+    bronze:
+      load_actual: "load_actual_bronze"     # Demande globale (market_demand, ontario_demand)
+      load_zonal: "load_zonal_bronze"       # Demande par zone (East, West, Toronto, ...)
+      weather: "weather_bronze"             # Historique météo Weather.gc.ca (entraînement)
+
+    silver:
+      demand_weather: "demand_weather_silver"  # Jointure demande + météo, nettoyée
+
+    gold:
+      ml_features_24h: "ml_features_gold_24h"      # Features + target pour le modèle 24h
+      ml_features_7j: "ml_features_gold_7j"         # Features multi-horizon (H+1 à H+168) pour le modèle 7j
+      ml_features_training: "ml_features_training_gold"  # Vue filtrée sur les lignes valides (24h)
+      load_forecast: "load_forecast_gold"      # Prédictions batch 24h (récursif, 09_batch_prediction)
+      load_forecast_7j: "load_forecast_7j"     # Prédictions batch 7j (direct, 09b_batch_prediction_7j_direct)
+      load_shap: "load_shap_gold"              # Valeurs SHAP associées aux prédictions 24h
+      load_shap_7j: "load_shap_7j"             # Valeurs SHAP associées aux prédictions 7j
+      model_performance: "model_performance_gold"  # Métriques de monitoring
+
+# ==================================================================================
+# SOURCES DE DONNÉES
+# ==================================================================================
+# Deux sources météo à des fins différentes :
+# - Weather.gc.ca (climate-hourly) : observations HISTORIQUES fiables, utilisées
+#   pour construire les features d'ENTRAÎNEMENT (pipeline/bronze/02_ingest_weather_historical.py)
+# - Open-Meteo (forecast + archive) : prévisions FUTURES nécessaires à l'INFÉRENCE,
+#   Weather.gc.ca ne fournissant pas de prévisions (pipeline/inference/08_build_prediction_features.py)
+data_sources:
+  ieso:
+    base_url: "https://reports-public.ieso.ca/public"
+    endpoints:
+      demand: "Demand"
+      demand_zonal: "DemandZonal"
+    update_frequency_hours: 1
+
+  weather_gcca:
+    base_url: "https://api.weather.gc.ca/collections/climate-hourly/items"
+    usage: "historical_training"
+
+  openmeteo:
+    forecast_url: "https://api.open-meteo.com/v1/forecast"
+    archive_url: "https://archive-api.open-meteo.com/v1/archive"
+    usage: "inference_forecast"
+    forecast_days: 7
+    update_frequency_hours: 6
+    variables:
+      - "temperature_2m"
+      - "relative_humidity_2m"
+      - "dewpoint_2m"
+      - "windspeed_10m"
+      - "cloudcover"
+
+# ==================================================================================
+# ZONES MÉTÉO ONTARIO
+# ==================================================================================
+# Poids basés sur population régionale (StatCan 2021) et consommation IESO par zone.
+# Répliqué depuis config/zones_config.py (source de vérité pour le code Python) ;
+# gardé ici en lecture rapide / documentation.
+weather_zones:
+  toronto: {latitude: 43.70, longitude: -79.42, weight: 0.25}
+  ottawa: {latitude: 45.42, longitude: -75.69, weight: 0.15}
+  west: {latitude: 43.45, longitude: -80.49, weight: 0.15}
+  southwest: {latitude: 42.98, longitude: -81.23, weight: 0.10}
+  niagara: {latitude: 43.09, longitude: -79.07, weight: 0.10}
+  east: {latitude: 44.23, longitude: -76.49, weight: 0.08}
+  northeast: {latitude: 46.49, longitude: -80.99, weight: 0.07}
+  northwest: {latitude: 48.38, longitude: -89.25, weight: 0.05}
+  bruce: {latitude: 44.33, longitude: -81.60, weight: 0.03}
+  essa: {latitude: 44.27, longitude: -79.78, weight: 0.02}
+
+# ==================================================================================
+# FEATURE ENGINEERING
+# ==================================================================================
+features:
+  lags:
+    hours: [1, 24, 48, 72, 144, 168, 336]
+
+  rolling:
+    windows: [3, 12, 24, 48, 72, 168]
+    functions: ["mean", "std", "min", "max"]
+
+  temperature:
+    hdd_base: 18  # Heating Degree Days
+    cdd_base: 18  # Cooling Degree Days
+
+  temporal:
+    cyclical_encoding: true  # sin/cos pour hour, dow, month
+
+# ==================================================================================
+# MODÈLES LIGHTGBM
+# ==================================================================================
+# Deux modèles distincts sont entraînés et déployés séparément :
+#   - `24h`   : pipeline/modeling/06_train_model_24h.py
+#   - `7j`    : pipeline/modeling/07_train_model_7j.py  (multi-horizon H+1 à H+168)
+# Chacun a son propre run MLflow ET son propre nom de modèle dans le Model
+# Registry, pour éviter que les deux entraînements ne s'écrasent mutuellement
+# (auparavant les deux scripts partageaient `experiment_name` et
+# `registry_model_name`, ce qui rendait impossible de charger "le bon" modèle
+# depuis 09_batch_prediction_24h.py de façon fiable).
+models:
+  common:
+    algorithm: "lightgbm"
+    hyperparameters:
+      objective: "regression"
+      metric: "rmse"
+      num_leaves: 31
+      learning_rate: 0.05
+      feature_fraction: 0.9
+      bagging_fraction: 0.8
+      bagging_freq: 5
+      max_depth: -1
+      min_data_in_leaf: 20
+      lambda_l1: 0.1
+      lambda_l2: 0.1
+      verbose: -1
+    training:
+      test_size: 0.2
+      validation_size: 0.1
+      random_state: 42
+      early_stopping_rounds: 50
+    mlflow:
+      tracking_uri: "databricks"
+
+  horizon_24h:
+    forecast_horizon_hours: 24
+    mlflow:
+      experiment_name: "/Users/n.jouglet23@gmail.com/ontario_demand_forecast_24h"
+      registry_model_name: "ontario_demand_lightgbm_24h"
+
+  horizon_7j:
+    forecast_horizon_hours: 168
+    mlflow:
+      experiment_name: "/Users/n.jouglet23@gmail.com/ontario_demand_forecast_7j"
+      registry_model_name: "ontario_demand_lightgbm_7j"
+
+# ==================================================================================
+# PRÉVISIONS
+# ==================================================================================
+forecasting:
+  horizons:
+    min_hours: 24
+    max_hours: 168
+
+  batch_frequency_hours: 6  # Toutes les 6h
+
+  output:
+    include_confidence_intervals: true
+    confidence_level: 0.95
+
+# ==================================================================================
+# MONITORING & ÉVALUATION
+# ==================================================================================
+monitoring:
+  metrics:
+    - "mae"   # Mean Absolute Error
+    - "rmse"  # Root Mean Squared Error
+    - "mape"  # Mean Absolute Percentage Error
+
+  evaluation_periods:
+    - 1    # J-1
+    - 7    # 7 jours
+    - 30   # 30 jours
+    - 90   # 90 jours
+
+  alerts:
+    mape_threshold: 5.0  # Alerte si MAPE > 5%
+    missing_data_threshold_hours: 6
+
+  # Cibles de performance par horizon (voir README)
+  targets_mape:
+    "24h": 2.0
+    "48h": 2.5
+    "168h": 3.5
+
+# ==================================================================================
+# JOBS DATABRICKS
+# ==================================================================================
+# Noms de tâches alignés sur les fichiers réels sous pipeline/ (numérotation
+# séquentielle 01 → 10 pour le tronc commun + modèle 24h ; les fichiers
+# suffixés "_7j"/"b" sont les équivalents dédiés au modèle 7 jours, qui a son
+# propre schéma Gold et son propre scoring direct — voir docs/architecture.md).
+jobs:
+  ingestion:
+    name: "ontario_demand_ingestion"
+    schedule: "0 */6 * * *"  # Toutes les 6h
+    tasks:
+      - "pipeline/bronze/01_ingest_ieso_demand"
+      - "pipeline/bronze/02_ingest_weather_historical"
+
+  processing:
+    name: "ontario_demand_processing"
+    schedule: "30 */6 * * *"  # 30 min après ingestion
+    tasks:
+      - "pipeline/silver/03_join_demand_weather"
+      - "pipeline/gold/04_build_features"        # -> ml_features_gold_24h
+      - "pipeline/gold/04_build_features_7j"     # -> ml_features_gold_7j
+      - "pipeline/gold/05_feature_selection"     # dédié au modèle 24h
+
+  training:
+    name: "ontario_demand_training"
+    schedule: "0 3 * * 0"  # Hebdomadaire, dimanche 03h
+    tasks:
+      - "pipeline/modeling/06_train_model_24h"
+      - "pipeline/modeling/07_train_model_7j"
+
+  prediction_24h:
+    name: "ontario_demand_prediction_24h"
+    schedule: "0 1,7,13,19 * * *"  # 01h, 07h, 13h, 19h
+    tasks:
+      # 09_batch_prediction exécute 08_build_prediction_features via exec()
+      # (voir le fichier lui-même) -> une seule tâche de job suffit.
+      - "pipeline/inference/09_batch_prediction"
+
+  prediction_7j:
+    name: "ontario_demand_prediction_7j"
+    schedule: "0 2,14 * * *"  # 02h, 14h (deux fois par jour)
+    tasks:
+      # 09b exécute 08b (qui exécute 08 avec MODEL_HORIZON_KEY='horizon_7j')
+      # via exec() en cascade -> une seule tâche de job suffit.
+      - "pipeline/inference/09b_batch_prediction_7j_direct"
+
+  evaluation:
+    name: "ontario_demand_evaluation"
+    schedule: "0 2 * * *"  # Quotidien à 02h
+    tasks:
+      - "pipeline/monitoring/10_model_evaluation"
