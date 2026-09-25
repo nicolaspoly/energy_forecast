@@ -23,12 +23,11 @@ modèle 7 jours entraîné avec `forecast_horizon_hours` comme feature.
 5. Écrire dans `load_forecast_7j` (table distincte du modèle 24h)
 """
 
-import subprocess
-subprocess.run(["pip", "install", "lightgbm", "-q"], check=True)
-
 import os
+import sys
 import yaml
 import json
+import subprocess
 import mlflow
 import mlflow.sklearn
 import numpy as np
@@ -37,7 +36,30 @@ from datetime import datetime
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 
+# lightgbm n'est pas préinstallé sur compute serverless CPU ; le modèle
+# entraîné dans 07_train_model_7j en dépend pour le unpickling.
+subprocess.check_call(
+    [sys.executable, '-m', 'pip', 'install', 'lightgbm', '-q']
+)
+
 spark = SparkSession.builder.getOrCreate()
+
+
+def _pandas_to_spark_df(pdf, label="temp"):
+    """Convertit un DataFrame pandas en Spark DataFrame via parquet intermédiaire.
+
+    spark.createDataFrame(pandas_df) peut se bloquer sur compute serverless
+    (Spark Connect). On passe par un fichier parquet temporaire pour éviter
+    ce problème.
+    """
+    import tempfile, shutil
+    tmp = tempfile.mkdtemp(prefix=f"spark_{label}_")
+    parquet_path = f"{tmp}/data.parquet"
+    pdf.to_parquet(parquet_path, index=False)
+    sdf = spark.read.parquet(parquet_path)
+    shutil.rmtree(tmp, ignore_errors=True)
+    return sdf
+
 
 # ============================================================
 # CONFIGURATION
@@ -152,13 +174,19 @@ client = mlflow.tracking.MlflowClient()
 # Charger MODEL_FEATURES et MODEL_ZONE_CATEGORIES depuis le modèle
 print("  Chargement des artefacts du modèle...")
 
-# Essayer d'abord Production, sinon le dernier run
+# UC ne supporte pas stages=["Production"]. On cherche la dernière
+# version dans le Model Registry (schéma 'default' où MLflow inscrit
+# automatiquement les modèles), sinon fallback sur le dernier run MLflow.
+FULL_MODEL_NAME = f"{CATALOG}.default.{MODEL_NAME}"
+
 try:
-    latest_version = client.get_latest_versions(
-        MODEL_NAME, stages=["Production"]
-    )[0]
-    run_id = latest_version.run_id
-    print(f"    Modèle Production: version {latest_version.version}")
+    mvs = client.search_model_versions(f"name='{FULL_MODEL_NAME}'")
+    if not mvs:
+        raise ValueError("Aucune version trouvée dans le Model Registry")
+    latest_mv = max(mvs, key=lambda mv: int(mv.version))
+    run_id = latest_mv.run_id
+    model_uri = f"models:/{FULL_MODEL_NAME}/{latest_mv.version}"
+    print(f"    Modèle UC: {FULL_MODEL_NAME} version {latest_mv.version}")
 except Exception:
     runs = mlflow.search_runs(
         experiment_names=[MLFLOW_EXPERIMENT],
@@ -171,7 +199,8 @@ except Exception:
             "Entraînez d'abord le modèle 7j avec 07_train_model_7j."
         )
     run_id = runs.iloc[0]['run_id']
-    print(f"    Dernier run: {run_id}")
+    model_uri = f"runs:/{run_id}/model"
+    print(f"    Pas de modèle dans UC, dernier run: {run_id}")
 
 # Récupération des artefacts (features et catégories de zones)
 try:
@@ -193,26 +222,6 @@ except Exception as e:
 
 # Chargement du modèle
 print("  Chargement du modèle LightGBM...")
-try:
-    latest_version = client.get_latest_versions(
-        MODEL_NAME, stages=["Production"]
-    )[0]
-    model_uri = f"models:/{MODEL_NAME}/Production"
-    print(
-        f"    Modèle Production: version {latest_version.version}"
-    )
-except Exception:
-    runs = mlflow.search_runs(
-        experiment_names=[MLFLOW_EXPERIMENT],
-        order_by=["start_time DESC"],
-        max_results=1,
-    )
-    run_id = runs.iloc[0]['run_id']
-    model_uri = f"runs:/{run_id}/model"
-    print(
-        f"    Pas de modèle en Production, dernier run: {run_id}"
-    )
-
 model = mlflow.sklearn.load_model(model_uri)
 print(f"    Modèle chargé: {type(model).__name__}")
 
@@ -460,7 +469,7 @@ print(
 print(f"\n[5/5] Écriture dans {FORECAST_TABLE}...")
 
 # Conversion en Spark DataFrame avec cast explicite des types
-spark_df = spark.createDataFrame(predictions_df)
+spark_df = _pandas_to_spark_df(predictions_df, "predictions")
 spark_df = spark_df.withColumn(
     "forecast_horizon_hours",
     F.col("forecast_horizon_hours").cast("int")
@@ -505,7 +514,7 @@ if not shap_df.empty:
         PARTITIONED BY (target_date)
     """)
 
-    shap_spark_df = spark.createDataFrame(shap_df)
+    shap_spark_df = _pandas_to_spark_df(shap_df, "shap")
     shap_spark_df.write.format("delta").mode("overwrite").saveAsTable(
         SHAP_TABLE,
     )

@@ -209,20 +209,20 @@ lambda_l2: 0.1
 
 ### Scoring batch
 
-**Modèle 24h — `pipeline/inference/09_batch_prediction.py`** (approche
-**récursive**) : charge le modèle 24h, prédit heure par heure jusqu'à
-l'horizon disponible dans les prévisions météo, réinjecte chaque prédiction
-comme lag pour l'heure suivante. Exécute `08_build_prediction_features.py`
+**Modèle 24h — `pipeline/inference/09_batch_prediction_24h.py`** (approche
+**directe**) : charge le modèle 24h, prédit les 24 horizons (H+1 à H+24)
+en une seule passe via `forecast_horizon_hours` comme feature — pas de
+boucle récursive. Exécute `08_build_prediction_features_24h.py`
 via `exec()` pour préparer les features (météo Open-Meteo + demande récente).
 Écrit dans `load_forecast_gold` / `load_shap_gold`.
 
-**Modèle 7j — `pipeline/inference/09b_batch_prediction_7j_direct.py`**
+**Modèle 7j — `pipeline/inference/09b_batch_prediction_7j.py`**
 (approche **directe**) : pour chaque `forecast_horizon_hours` de 1 à 168,
 calcule les features correspondantes et appelle `model.predict(...)`
 directement — pas de boucle récursive, pas de propagation d'erreur d'un
 horizon à l'autre. Exécute `08b_build_prediction_features_7j.py` (un wrapper
 qui surcharge `MODEL_HORIZON_KEY = "horizon_7j"` puis exécute
-`08_build_prediction_features.py` via `exec()`). Écrit dans
+`08_build_prediction_features_24h.py` via `exec()`). Écrit dans
 `load_forecast_7j` / `load_shap_7j`.
 
 ---
@@ -234,10 +234,10 @@ Voir `config.yaml -> jobs` pour la définition exacte (tâches, cron). Résumé 
 | Job | Fréquence | Tâches |
 |---|---|---|
 | `ontario_demand_ingestion` | Toutes les 6h | `01_ingest_ieso_demand`, `02_ingest_weather_historical` |
-| `ontario_demand_processing` | 30 min après ingestion | `03_join_demand_weather`, `04_build_features`, `04_build_features_7j`, `05_feature_selection` |
+| `ontario_demand_processing` | 30 min après ingestion | `03_join_demand_weather`, `04_build_features_24h`, `04_build_features_7j`, `05_feature_selection` |
 | `ontario_demand_training` | Hebdomadaire (dim. 03h) | `06_train_model_24h`, `07_train_model_7j` |
-| `ontario_demand_prediction_24h` | 01h, 07h, 13h, 19h | `09_batch_prediction` (inclut `08_build_prediction_features` via `exec()`) |
-| `ontario_demand_prediction_7j` | 02h, 14h | `09b_batch_prediction_7j_direct` (inclut `08b` puis `08` via `exec()` en cascade) |
+| `ontario_demand_prediction_24h` | 01h, 07h, 13h, 19h | `09_batch_prediction_24h` (inclut `08_build_prediction_features_24h` via `exec()`) |
+| `ontario_demand_prediction_7j` | 02h, 14h | `09b_batch_prediction_7j` (inclut `08b` puis `08_24h` via `exec()` en cascade) |
 | `ontario_demand_evaluation` | Quotidien à 02h | `10_model_evaluation` |
 
 ---

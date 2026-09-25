@@ -1,5 +1,17 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""
+03 - Jointure Demand + Weather (Silver Layer)
 
+Joint les données de demande zonale (Bronze) avec les données météo (Bronze),
+filtrée des agrégats (Diff, Zone Total, Market), et enrichit de features
+dérivées (HDD/CDD, variables temporelles, normalisation par zone).
 
+Source : {catalog}.{schema}.load_zonal_bronze + weather_bronze
+Destination : {catalog}.{schema}.demand_weather_silver
+
+Next : 04_build_features.py (Gold)
+"""
 
 import os
 import yaml
@@ -10,7 +22,7 @@ from pyspark.sql.window import Window
 # Chemin du projet : surchargeable via ENERGY_FORECAST_PROJECT_ROOT.
 PROJECT_ROOT = os.environ.get(
     "ENERGY_FORECAST_PROJECT_ROOT",
-    "/Workspace/Users/n.jouglet23@gmail.com/energy_forecast_clean",
+    "/Workspace/Users/n.jouglet23@gmail.com/energy_forecast",
 )
 
 # Configuration
@@ -46,11 +58,7 @@ print("\n📥 Chargement des données Bronze...")
 df_demand = spark.table(DEMAND_TABLE)
 df_weather = spark.table(WEATHER_TABLE)
 
-# DEBUG: Afficher les zones AVANT filtrage
-print("\n🔍 Zones dans demand AVANT filtrage:")
-df_demand.select("zone").distinct().orderBy("zone").show(50, False)
-
-# Exclure uniquement les zones calculées: Diff, Zone Total, Total, Market
+# Exclure les agrégats (Diff, Zone Total, Market) qui ne sont pas de vraies zones géographiques
 # Regex case-insensitive: zone.?total matche "Zone Total", "zone_total", "ZONE TOTAL", etc.
 df_demand = df_demand.filter(
     ~F.col("zone").rlike("(?i)^(diff|total|zone.?total|market)$")
@@ -58,10 +66,6 @@ df_demand = df_demand.filter(
 df_weather = df_weather.filter(
     ~F.col("zone").rlike("(?i)^(diff|total|zone.?total|market)$")
 )
-
-# DEBUG: Afficher les zones APRÈS filtrage
-print("\n✅ Zones dans demand APRÈS filtrage:")
-df_demand.select("zone").distinct().orderBy("zone").show(50, False)
 
 print(f"  ✅ Demand: {df_demand.count():,} lignes")
 print(f"  ✅ Weather: {df_weather.count():,} lignes")

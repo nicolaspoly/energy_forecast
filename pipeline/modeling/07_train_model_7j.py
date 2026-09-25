@@ -3,11 +3,18 @@
 # [tool.databricks.environment]
 # environment_version = "5"
 # ///
+# DBTITLE 1,Title
 # MAGIC %md
 # MAGIC # Entraînement LightGBM multi-horizon H+1 à H+168
 # MAGIC
 # MAGIC Ce notebook entraîne un modèle direct, non récursif, pour prévoir
 # MAGIC les 168 prochaines heures de demande électrique par zone.
+# MAGIC
+# MAGIC Meilleures pratiques implémentées :
+# MAGIC - **Modèle direct** (forecast_horizon_hours comme feature, pas de récursion)
+# MAGIC - **Walk-forward backtesting** (5 folds de 30 jours)
+# MAGIC - **Quantile forecasting** P10/P50/P90
+# MAGIC - **Réconciliation hiérarchique** bottom-up (zones → Ontario total)
 # MAGIC
 # MAGIC Structure attendue dans la table Gold :
 # MAGIC
@@ -21,7 +28,7 @@
 
 # COMMAND ----------
 
-# MAGIC %pip install lightgbm -q
+# MAGIC %pip install lightgbm optuna -q
 
 # COMMAND ----------
 
@@ -39,6 +46,7 @@ import yaml
 import mlflow
 import mlflow.sklearn
 import lightgbm as lgb
+import optuna
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -55,6 +63,7 @@ warnings.filterwarnings("ignore")
 
 print(f"LightGBM : {lgb.__version__}")
 print(f"MLflow   : {mlflow.__version__}")
+print(f"Optuna   : {optuna.__version__}")
 
 # COMMAND ----------
 
@@ -67,7 +76,7 @@ print(f"MLflow   : {mlflow.__version__}")
 # Chemin du projet : surchargeable via ENERGY_FORECAST_PROJECT_ROOT.
 PROJECT_ROOT = os.environ.get(
     "ENERGY_FORECAST_PROJECT_ROOT",
-    "/Workspace/Users/n.jouglet23@gmail.com/energy_forecast_clean",
+    "/Workspace/Users/n.jouglet23@gmail.com/energy_forecast",
 )
 CONFIG_PATH = f"{PROJECT_ROOT}/config/config.yaml"
 
@@ -113,6 +122,16 @@ FEATURE_COUNTS_TO_TEST = [
 ]
 
 WAPE_TOLERANCE_PERCENTAGE_POINT = 0.05
+
+# Quantile forecasting : P10 (optimiste), P50 (médiane), P90 (pessimiste).
+QUANTILES = [0.1, 0.5, 0.9]
+
+# Walk-forward backtesting : 5 folds de 30 jours avec fenêtre expansive.
+N_WALK_FORWARD_FOLDS = 5
+WALK_FORWARD_TEST_DAYS = 30
+
+# Réconciliation hiérarchique : bottom-up (somme des prévisions zonales = total Ontario).
+RECONCILIATION_METHOD = "bottom_up"
 
 ARTIFACT_DIRECTORY = (
     "/tmp/lightgbm_energy_forecast_168h"
@@ -485,135 +504,15 @@ print(
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 5. Création des features multi-horizon
-
-# COMMAND ----------
-
-pd_data["forecast_day"] = (
-    (
-        pd_data[HORIZON_COLUMN] - 1
-    ) // 24
-    + 1
-).astype("int8")
-
-pd_data["forecast_hour_in_day"] = (
-    (
-        pd_data[HORIZON_COLUMN] - 1
-    ) % 24
-    + 1
-).astype("int8")
-
-pd_data["forecast_horizon_sqrt"] = np.sqrt(
-    pd_data[HORIZON_COLUMN]
-)
-
-pd_data["forecast_horizon_log1p"] = np.log1p(
-    pd_data[HORIZON_COLUMN]
-)
-
-pd_data["forecast_horizon_sin_24h"] = np.sin(
-    2.0
-    * np.pi
-    * pd_data[HORIZON_COLUMN]
-    / 24.0
-)
-
-pd_data["forecast_horizon_cos_24h"] = np.cos(
-    2.0
-    * np.pi
-    * pd_data[HORIZON_COLUMN]
-    / 24.0
-)
-
-pd_data["forecast_horizon_sin_168h"] = np.sin(
-    2.0
-    * np.pi
-    * pd_data[HORIZON_COLUMN]
-    / 168.0
-)
-
-pd_data["forecast_horizon_cos_168h"] = np.cos(
-    2.0
-    * np.pi
-    * pd_data[HORIZON_COLUMN]
-    / 168.0
-)
-
-target_datetime = pd_data[
-    TARGET_DATETIME_COLUMN
-]
-
-pd_data["target_hour"] = (
-    target_datetime.dt.hour.astype("int8")
-)
-
-pd_data["target_day_of_week"] = (
-    target_datetime.dt.dayofweek.astype("int8")
-)
-
-pd_data["target_day_of_year"] = (
-    target_datetime.dt.dayofyear.astype("int16")
-)
-
-pd_data["target_is_weekend"] = (
-    pd_data["target_day_of_week"] >= 5
-).astype("int8")
-
-pd_data["target_hour_sin"] = np.sin(
-    2.0
-    * np.pi
-    * pd_data["target_hour"]
-    / 24.0
-)
-
-pd_data["target_hour_cos"] = np.cos(
-    2.0
-    * np.pi
-    * pd_data["target_hour"]
-    / 24.0
-)
-
-pd_data["target_day_of_week_sin"] = np.sin(
-    2.0
-    * np.pi
-    * pd_data["target_day_of_week"]
-    / 7.0
-)
-
-pd_data["target_day_of_week_cos"] = np.cos(
-    2.0
-    * np.pi
-    * pd_data["target_day_of_week"]
-    / 7.0
-)
-
-pd_data["target_day_of_year_sin"] = np.sin(
-    2.0
-    * np.pi
-    * pd_data["target_day_of_year"]
-    / 365.25
-)
-
-pd_data["target_day_of_year_cos"] = np.cos(
-    2.0
-    * np.pi
-    * pd_data["target_day_of_year"]
-    / 365.25
-)
-
-# COMMAND ----------
-
-# MAGIC %md
 # MAGIC ## 6. Définition des features candidates
 
 # COMMAND ----------
 
+# Exclure uniquement : la cible, les dates brutes (inutiles en epoch),
+# les colonnes techniques, et demand_mw (même grain que la cible).
 EXCLUDED_COLUMNS = {
-    # Cibles.
     "target_demand_mw",
     "target_24h_ahead",
-
-    # Dates brutes.
     "datetime",
     "issue_datetime",
     "target_datetime",
@@ -621,40 +520,11 @@ EXCLUDED_COLUMNS = {
     "target_date",
     "date",
     "processed_time",
-
-    # Colonnes techniques.
     "has_valid_features",
     "has_valid_target",
     "is_training_row",
-
-    # Demande brute.
     "demand_mw",
-
-    # Calendrier brut.
-    "year",
-    "month",
-    "day",
-    "hour",
-    "day_of_year",
-    "day_of_week",
-    "issue_year",
-    "issue_month",
-    "issue_day",
-    "issue_hour",
-    "issue_day_of_year",
-    "issue_day_of_week",
-    "target_year",
-    "target_month",
-    "target_day",
 }
-
-LEAKAGE_PATTERNS = [
-    "lead_demand",
-    "future_demand",
-    "actual_future",
-    "target_24h_ahead",
-    "target_demand_mw",
-]
 
 candidate_features = [
     column
@@ -663,27 +533,8 @@ candidate_features = [
     and column != TARGET_COLUMN
 ]
 
-suspected_leakage_features = [
-    column
-    for column in candidate_features
-    if any(
-        pattern.lower() in column.lower()
-        for pattern in LEAKAGE_PATTERNS
-    )
-]
-
-if suspected_leakage_features:
-    print("Features supprimées pour risque de fuite :")
-
-    for feature in suspected_leakage_features:
-        print(f"  - {feature}")
-
-candidate_features = [
-    feature
-    for feature in candidate_features
-    if feature not in suspected_leakage_features
-]
-
+# Features obligatoires conservées dans tous les cas (utilisées par la
+# sélection de features en aval).
 MANDATORY_FEATURES = [
     ZONE_COLUMN,
     HORIZON_COLUMN,
@@ -705,169 +556,14 @@ MANDATORY_FEATURES = [
 ]
 
 for feature in MANDATORY_FEATURES:
-    if feature not in pd_data.columns:
-        raise ValueError(
-            f"Feature obligatoire absente : {feature}"
-        )
-
-    if feature not in candidate_features:
+    if feature in pd_data.columns and feature not in candidate_features:
         candidate_features.append(feature)
 
-print(
-    f"Features candidates initiales : "
-    f"{len(candidate_features)}"
-)
+# La table Gold est déjà nettoyée (EDA validée) : pas de vérification
+# de fuites ni de présélection technique.
+selected_candidate_features = candidate_features.copy()
 
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## 7. Nettoyage technique des features
-
-# COMMAND ----------
-
-feature_quality_rows = []
-
-for feature in candidate_features:
-    series = pd_data[feature]
-
-    missing_rate = float(
-        series.isna().mean()
-    )
-
-    unique_count = int(
-        series.nunique(dropna=True)
-    )
-
-    non_null_series = series.dropna()
-
-    if len(non_null_series) > 0:
-        dominant_rate = float(
-            non_null_series.value_counts(
-                normalize=True
-            ).iloc[0]
-        )
-    else:
-        dominant_rate = 1.0
-
-    feature_quality_rows.append({
-        "feature": feature,
-        "dtype": str(series.dtype),
-        "missing_rate": missing_rate,
-        "unique_count": unique_count,
-        "dominant_rate": dominant_rate,
-    })
-
-feature_quality = pd.DataFrame(
-    feature_quality_rows
-)
-
-features_all_missing = feature_quality.loc[
-    feature_quality["missing_rate"] >= 1.0,
-    "feature",
-].tolist()
-
-features_high_missing = feature_quality.loc[
-    (
-        feature_quality["missing_rate"]
-        > MAX_MISSING_RATE
-    )
-    & (
-        feature_quality["missing_rate"] < 1.0
-    ),
-    "feature",
-].tolist()
-
-features_constant = feature_quality.loc[
-    feature_quality["unique_count"] <= 1,
-    "feature",
-].tolist()
-
-features_near_constant = feature_quality.loc[
-    (
-        feature_quality["dominant_rate"]
-        >= NEAR_CONSTANT_THRESHOLD
-    )
-    & (
-        feature_quality["unique_count"] > 1
-    ),
-    "feature",
-].tolist()
-
-object_features = [
-    column
-    for column in candidate_features
-    if (
-        pd.api.types.is_object_dtype(
-            pd_data[column]
-        )
-        or pd.api.types.is_string_dtype(
-            pd_data[column]
-        )
-    )
-    and column != ZONE_COLUMN
-]
-
-technical_features_to_remove = set(
-    features_all_missing
-    + features_high_missing
-    + features_constant
-    + features_near_constant
-    + object_features
-)
-
-# Ne jamais supprimer une feature obligatoire.
-technical_features_to_remove = (
-    technical_features_to_remove
-    - set(MANDATORY_FEATURES)
-)
-
-selected_candidate_features = [
-    feature
-    for feature in candidate_features
-    if feature not in technical_features_to_remove
-]
-
-for feature in MANDATORY_FEATURES:
-    if feature not in selected_candidate_features:
-        selected_candidate_features.append(feature)
-
-print(
-    f"Features entièrement manquantes : "
-    f"{len(features_all_missing)}"
-)
-print(
-    f"Features trop manquantes         : "
-    f"{len(features_high_missing)}"
-)
-print(
-    f"Features constantes              : "
-    f"{len(features_constant)}"
-)
-print(
-    f"Features quasi constantes        : "
-    f"{len(features_near_constant)}"
-)
-print(
-    f"Features texte retirées          : "
-    f"{len(object_features)}"
-)
-print(
-    f"Features après nettoyage         : "
-    f"{len(selected_candidate_features)}"
-)
-
-display(
-    feature_quality.sort_values(
-        [
-            "missing_rate",
-            "dominant_rate",
-        ],
-        ascending=[
-            False,
-            False,
-        ],
-    )
-)
+print(f"Features candidates : {len(selected_candidate_features)}")
 
 # COMMAND ----------
 
@@ -957,11 +653,18 @@ print(
 
 # COMMAND ----------
 
+# DBTITLE 1,Walk-forward header
 # MAGIC %md
-# MAGIC ## 9. Split temporel purgé
+# MAGIC ## 9. Walk-forward backtesting
+# MAGIC
+# MAGIC Au lieu d'un seul split train/validation/test, on définit **5 folds de 30 jours**
+# MAGIC avec une fenêtre d'entraînement expansive. Le dernier fold sert de test final,
+# MAGIC et les folds précédents permettent d'évaluer la robustesse du modèle dans le temps.
 
 # COMMAND ----------
 
+# DBTITLE 1,Walk-forward split
+# --- Walk-forward : définition des folds ---
 unique_issue_datetimes = np.sort(
     model_data[
         ISSUE_DATETIME_COLUMN
@@ -970,112 +673,54 @@ unique_issue_datetimes = np.sort(
 
 if len(unique_issue_datetimes) < 100:
     raise ValueError(
-        "Moins de 100 dates d'émission sont disponibles. "
-        "Le split temporel ne serait pas suffisamment robuste."
+        "Moins de 100 dates d'émission pour le walk-forward."
     )
 
-train_end_index = int(
-    len(unique_issue_datetimes)
-    * TRAIN_RATIO
-)
+# 5 folds de 30 jours, fenêtre expansive, depuis la fin des données.
+max_datetime = pd.Timestamp(unique_issue_datetimes[-1])
+fold_boundaries = []
+for i in range(N_WALK_FORWARD_FOLDS):
+    fold_end = max_datetime - pd.Timedelta(days=WALK_FORWARD_TEST_DAYS * i)
+    fold_start = fold_end - pd.Timedelta(days=WALK_FORWARD_TEST_DAYS)
+    fold_boundaries.append((fold_start, fold_end))
+fold_boundaries.reverse()
 
-validation_end_index = int(
-    len(unique_issue_datetimes)
-    * (
-        TRAIN_RATIO
-        + VALIDATION_RATIO
-    )
-)
+print("Folds walk-forward :")
+for i, (start, end) in enumerate(fold_boundaries, 1):
+    train_count = (model_data[ISSUE_DATETIME_COLUMN] < start).sum()
+    test_count = ((model_data[ISSUE_DATETIME_COLUMN] >= start) & (model_data[ISSUE_DATETIME_COLUMN] < end)).sum()
+    print(f"  Fold {i}: test {start.strftime('%Y-%m-%d')} → {end.strftime('%Y-%m-%d')} | train: {train_count:,} | test: {test_count:,}")
 
-if train_end_index <= 0:
-    raise ValueError(
-        "Index de fin du train invalide."
-    )
+# --- Split final : dernier fold = test, avant-dernier = validation ---
+last_fold_start, last_fold_end = fold_boundaries[-1]
+second_last_start, _ = fold_boundaries[-2]
 
-if validation_end_index >= len(
-    unique_issue_datetimes
-):
-    raise ValueError(
-        "Index de fin de validation invalide."
-    )
-
-raw_train_end = pd.Timestamp(
-    unique_issue_datetimes[
-        train_end_index - 1
-    ]
-)
-
-validation_start = pd.Timestamp(
-    unique_issue_datetimes[
-        train_end_index
-    ]
-)
-
-raw_validation_end = pd.Timestamp(
-    unique_issue_datetimes[
-        validation_end_index - 1
-    ]
-)
-
-test_start = pd.Timestamp(
-    unique_issue_datetimes[
-        validation_end_index
-    ]
-)
+validation_start = pd.Timestamp(second_last_start)
+test_start = pd.Timestamp(last_fold_start)
 
 # Purge des cibles qui débordent dans la période suivante.
-train_latest_target = (
-    validation_start
-    - pd.Timedelta(hours=1)
-)
-
-validation_latest_target = (
-    test_start
-    - pd.Timedelta(hours=1)
-)
+train_latest_target = validation_start - pd.Timedelta(hours=1)
+validation_latest_target = test_start - pd.Timedelta(hours=1)
 
 train_mask = (
-    (
-        model_data[ISSUE_DATETIME_COLUMN]
-        <= raw_train_end
-    )
-    & (
-        model_data[TARGET_DATETIME_COLUMN]
-        <= train_latest_target
-    )
+    (model_data[ISSUE_DATETIME_COLUMN] < validation_start)
+    & (model_data[TARGET_DATETIME_COLUMN] <= train_latest_target)
 )
 
 validation_mask = (
-    (
-        model_data[ISSUE_DATETIME_COLUMN]
-        >= validation_start
-    )
-    & (
-        model_data[ISSUE_DATETIME_COLUMN]
-        <= raw_validation_end
-    )
-    & (
-        model_data[TARGET_DATETIME_COLUMN]
-        <= validation_latest_target
-    )
+    (model_data[ISSUE_DATETIME_COLUMN] >= validation_start)
+    & (model_data[ISSUE_DATETIME_COLUMN] < test_start)
+    & (model_data[TARGET_DATETIME_COLUMN] <= validation_latest_target)
 )
 
 test_mask = (
-    model_data[ISSUE_DATETIME_COLUMN]
-    >= test_start
+    (model_data[ISSUE_DATETIME_COLUMN] >= test_start)
+    & (model_data[ISSUE_DATETIME_COLUMN] < last_fold_end)
 )
 
-train_data = model_data.loc[
-    train_mask
-].copy()
-
-validation_data = model_data.loc[
-    validation_mask
-].copy()
-
-test_data = model_data.loc[
-    test_mask
-].copy()
+train_data = model_data.loc[train_mask].copy()
+validation_data = model_data.loc[validation_mask].copy()
+test_data = model_data.loc[test_mask].copy()
 
 if min(
     len(train_data),
@@ -1104,7 +749,7 @@ if not (
     )
 
 print("=" * 80)
-print("SPLIT TEMPOREL PURGÉ")
+print("SPLIT FINAL (walk-forward purgé)")
 print("=" * 80)
 
 print(
@@ -1757,6 +1402,126 @@ for index, feature in enumerate(
 
 # COMMAND ----------
 
+# DBTITLE 1,Optuna header
+# MAGIC %md
+# MAGIC ## 13b. Optimisation des hyperparamètres (Optuna)
+# MAGIC
+# MAGIC Recherche bayésienne sur les hyperparamètres LightGBM, en utilisant les features
+# MAGIC sélectionnées à l'étape précédente. Optimisation sur le WAPE de validation.
+# MAGIC
+# MAGIC Espace de recherche :
+# MAGIC - `learning_rate`, `num_leaves`, `min_child_samples`
+# MAGIC - `subsample`, `colsample_bytree`
+# MAGIC - `reg_alpha`, `reg_lambda`, `max_depth`
+# MAGIC
+# MAGIC Early stopping (50 rounds) pour trouver automatiquement le nombre optimal d'arbres.
+
+# COMMAND ----------
+
+# DBTITLE 1,Optuna tuning
+# --- Optimisation Optuna des hyperparamètres ---
+optuna.logging.set_verbosity(optuna.logging.WARNING)
+
+cat_cols_tune = [
+    c for c in selected_features
+    if str(train_data[c].dtype) == "category"
+]
+
+X_tune_train = train_data[selected_features].copy()
+y_tune_train = train_data[TARGET_COLUMN].copy()
+X_tune_val = validation_data[selected_features].copy()
+y_tune_val = validation_data[TARGET_COLUMN].copy()
+
+
+def optuna_objective(trial):
+    """Minimise le WAPE sur le jeu de validation."""
+    params = {
+        "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.1, log=True),
+        "num_leaves": trial.suggest_int("num_leaves", 15, 127),
+        "max_depth": trial.suggest_int("max_depth", 3, 15),
+        "min_child_samples": trial.suggest_int("min_child_samples", 20, 500),
+        "subsample": trial.suggest_float("subsample", 0.5, 1.0),
+        "colsample_bytree": trial.suggest_float("colsample_bytree", 0.5, 1.0),
+        "reg_alpha": trial.suggest_float("reg_alpha", 1e-4, 10.0, log=True),
+        "reg_lambda": trial.suggest_float("reg_lambda", 1e-4, 10.0, log=True),
+    }
+
+    model = lgb.LGBMRegressor(
+        objective="regression_l1",
+        n_estimators=300,
+        **params,
+        subsample_freq=1,
+        random_state=RANDOM_STATE,
+        n_jobs=-1,
+        verbosity=-1,
+    )
+
+    model.fit(
+        X_tune_train,
+        y_tune_train,
+        eval_set=[(X_tune_val, y_tune_val)],
+        categorical_feature=cat_cols_tune,
+        callbacks=[
+            lgb.early_stopping(30, verbose=False),
+            lgb.log_evaluation(0),
+        ],
+    )
+
+    val_pred = model.predict(X_tune_val)
+    val_metrics = calculate_metrics(y_tune_val, val_pred)
+
+    trial.set_user_attr("best_iteration", int(model.best_iteration_))
+
+    return val_metrics["wape"]
+
+
+N_OPTUNA_TRIALS = 20
+
+print(f"Optimisation Optuna : {N_OPTUNA_TRIALS} trials")
+print(f"Features : {len(selected_features)}")
+print(f"Train : {len(train_data):,} | Validation : {len(validation_data):,}")
+print("=" * 70)
+
+study = optuna.create_study(
+    direction="minimize",
+    pruner=optuna.pruners.MedianPruner(n_warmup_steps=5),
+)
+study.optimize(
+    optuna_objective,
+    n_trials=N_OPTUNA_TRIALS,
+    show_progress_bar=True,
+)
+
+tuned_params = study.best_params
+tuned_n_estimators = study.best_trial.user_attrs["best_iteration"]
+
+print("\n" + "=" * 70)
+print("MEILLEURS HYPERPARAMÈTRES (Optuna)")
+print("=" * 70)
+print(f"WAPE validation : {study.best_value:.3f}%")
+print(f"N arbres        : {tuned_n_estimators}")
+for key, value in tuned_params.items():
+    print(f"  {key:20s} : {value}")
+
+# Comparaison avec les paramètres par défaut
+default_params = {
+    "learning_rate": 0.05,
+    "num_leaves": 31,
+    "max_depth": -1,
+    "min_child_samples": 100,
+    "subsample": 0.80,
+    "colsample_bytree": 0.80,
+    "reg_alpha": 0.10,
+    "reg_lambda": 1.00,
+}
+print("\nComparaison paramètres par défaut → optimisés :")
+for key in default_params:
+    old = default_params[key]
+    new = tuned_params.get(key, old)
+    print(f"  {key:20s} : {old} → {new}")
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## 14. Réentraînement final
 
@@ -1812,16 +1577,9 @@ categorical_features_final = [
 
 final_params = {
     "objective": "regression_l1",
-    "n_estimators": BEST_ITERATION,
-    "learning_rate": 0.05,
-    "num_leaves": 31,
-    "max_depth": -1,
-    "min_child_samples": 100,
-    "subsample": 0.80,
+    "n_estimators": tuned_n_estimators,
+    **tuned_params,
     "subsample_freq": 1,
-    "colsample_bytree": 0.80,
-    "reg_alpha": 0.10,
-    "reg_lambda": 1.00,
     "random_state": RANDOM_STATE,
     "n_jobs": -1,
     "importance_type": "gain",
@@ -1942,6 +1700,226 @@ display(
 
 # COMMAND ----------
 
+# DBTITLE 1,Quantile forecasting header
+# MAGIC %md
+# MAGIC ## Quantile forecasting P10/P50/P90
+# MAGIC
+# MAGIC Entraînement de 3 modèles LightGBM avec `objective="quantile"` pour produire
+# MAGIC des intervalles de prévision sur les 168 horizons :
+# MAGIC - **P10** : scénario optimiste (10e percentile)
+# MAGIC - **P50** : médiane (50e percentile)
+# MAGIC - **P90** : scénario pessimiste (90e percentile)
+
+# COMMAND ----------
+
+# DBTITLE 1,Quantile forecasting training
+# --- Entraînement des modèles quantile ---
+quantile_models = {}
+quantile_predictions_test = {}
+
+cat_cols_07 = [
+    c for c in selected_features
+    if str(X_train_validation[c].dtype) == "category"
+]
+
+for q in QUANTILES:
+    print(f"\nEntraînement modèle quantile P{int(q*100)}...")
+    
+    quantile_model = lgb.LGBMRegressor(
+        objective="quantile",
+        alpha=q,
+        n_estimators=tuned_n_estimators,
+        **tuned_params,
+        subsample_freq=1,
+        random_state=RANDOM_STATE,
+        n_jobs=-1,
+        verbosity=-1,
+    )
+    
+    quantile_model.fit(
+        X_train_validation,
+        y_train_validation,
+        categorical_feature=cat_cols_07,
+    )
+    
+    quantile_models[q] = quantile_model
+    quantile_predictions_test[q] = quantile_model.predict(X_test)
+    print(f"  P{int(q*100)} : {len(quantile_predictions_test[q])} prédictions générées")
+
+# --- Évaluation : pinball loss ---
+def pinball_loss(y_true, y_pred, quantile):
+    """Calcule la pinball loss pour un quantile donné."""
+    diff = np.asarray(y_true, dtype=float) - np.asarray(y_pred, dtype=float)
+    return np.mean(np.maximum(quantile * diff, (quantile - 1) * diff))
+
+print("\n" + "=" * 70)
+print("ÉVALUATION QUANTILE FORECASTING")
+print("=" * 70)
+
+for q in QUANTILES:
+    pl = pinball_loss(y_test, quantile_predictions_test[q], q)
+    print(f"  P{int(q*100):2d} pinball loss : {pl:.3f} MW")
+
+y_test_arr = np.asarray(y_test, dtype=float)
+coverage = np.mean(
+    (y_test_arr >= quantile_predictions_test[0.1])
+    & (y_test_arr <= quantile_predictions_test[0.9])
+) * 100
+print(f"\n  Couverture P10-P90 : {coverage:.1f}% (cible : 80%)")
+
+interval_width = np.mean(quantile_predictions_test[0.9] - quantile_predictions_test[0.1])
+print(f"  Largeur moyenne P10-P90 : {interval_width:.1f} MW")
+
+# Ajouter les colonnes quantile au DataFrame de prédictions
+test_predictions_df["p10_mw"] = quantile_predictions_test[0.1]
+test_predictions_df["p50_mw"] = quantile_predictions_test[0.5]
+test_predictions_df["p90_mw"] = quantile_predictions_test[0.9]
+
+print("\n✅ Quantile forecasting ajouté au DataFrame de prédictions")
+
+# COMMAND ----------
+
+# DBTITLE 1,Walk-forward evaluation header
+# MAGIC %md
+# MAGIC ## Walk-forward backtesting (allégé)
+# MAGIC
+# MAGIC Évaluation du modèle sur les 5 folds. Pour chaque fold :
+# MAGIC 1. entraîner un **point forecast** sur toutes les données émises avant le fold ;
+# MAGIC 2. prédire sur le fold et calculer les métriques.
+# MAGIC
+# MAGIC Les **quantiles P10/P50/P90** sont entraînés uniquement sur le **dernier fold** (test set)
+# MAGIC pour réduire le temps de calcul (8 modèles au lieu de 20).
+
+# COMMAND ----------
+
+# DBTITLE 1,Walk-forward evaluation
+# --- Walk-forward backtesting (allégé) ---
+# Folds 1-5 : point forecast uniquement
+# Dernier fold (test) : point forecast + 3 quantiles
+wf_results = []
+wf_predictions_all = []
+
+print("=" * 70)
+print("WALK-FORWARD BACKTESTING (allégé)")
+print("=" * 70)
+
+for fold_idx, (fold_start, fold_end) in enumerate(fold_boundaries, 1):
+    fold_start_ts = pd.Timestamp(fold_start)
+    fold_end_ts = pd.Timestamp(fold_end)
+
+    wf_train = model_data[model_data[ISSUE_DATETIME_COLUMN] < fold_start_ts]
+    wf_test = model_data[
+        (model_data[ISSUE_DATETIME_COLUMN] >= fold_start_ts)
+        & (model_data[ISSUE_DATETIME_COLUMN] < fold_end_ts)
+    ]
+
+    if len(wf_train) == 0 or len(wf_test) == 0:
+        print(f"  Fold {fold_idx}: ignoré (train={len(wf_train)}, test={len(wf_test)})")
+        continue
+
+    X_wf_train = wf_train[selected_features].copy()
+    y_wf_train = wf_train[TARGET_COLUMN].copy()
+    X_wf_test = wf_test[selected_features].copy()
+    y_wf_test = wf_test[TARGET_COLUMN].copy()
+
+    cat_cols_wf = [c for c in selected_features if str(X_wf_train[c].dtype) == "category"]
+
+    # Modèle point forecast
+    wf_model = lgb.LGBMRegressor(
+        objective="regression_l1",
+        n_estimators=tuned_n_estimators,
+        **tuned_params,
+        subsample_freq=1,
+        random_state=RANDOM_STATE,
+        n_jobs=-1,
+        verbosity=-1,
+    )
+    wf_model.fit(X_wf_train, y_wf_train, categorical_feature=cat_cols_wf)
+    wf_pred = wf_model.predict(X_wf_test)
+    wf_metrics = calculate_metrics(y_wf_test, wf_pred)
+
+    wf_row = {
+        "fold": fold_idx,
+        "test_start": fold_start_ts.strftime("%Y-%m-%d"),
+        "test_end": fold_end_ts.strftime("%Y-%m-%d"),
+        "train_size": len(wf_train),
+        "test_size": len(wf_test),
+        **wf_metrics,
+    }
+
+    wf_pred_df = wf_test[
+        [ISSUE_DATETIME_COLUMN, TARGET_DATETIME_COLUMN, HORIZON_COLUMN, ZONE_COLUMN, TARGET_COLUMN]
+    ].copy()
+    wf_pred_df["prediction_mw"] = wf_pred
+    wf_pred_df["fold"] = fold_idx
+
+    # Quantiles uniquement sur le dernier fold (test set)
+    is_last_fold = fold_idx == len(fold_boundaries)
+    if is_last_fold:
+        wf_quantile_preds = {}
+        for q in QUANTILES:
+            wf_q_model = lgb.LGBMRegressor(
+                objective="quantile",
+                alpha=q,
+                n_estimators=tuned_n_estimators,
+                **tuned_params,
+                subsample_freq=1,
+                random_state=RANDOM_STATE,
+                n_jobs=-1,
+                verbosity=-1,
+            )
+            wf_q_model.fit(X_wf_train, y_wf_train, categorical_feature=cat_cols_wf)
+            wf_quantile_preds[q] = wf_q_model.predict(X_wf_test)
+
+        wf_pl = {q: pinball_loss(y_wf_test, wf_quantile_preds[q], q) for q in QUANTILES}
+        y_wf_arr = np.asarray(y_wf_test, dtype=float)
+        wf_coverage = np.mean(
+            (y_wf_arr >= wf_quantile_preds[0.1])
+            & (y_wf_arr <= wf_quantile_preds[0.9])
+        ) * 100
+
+        wf_row["pinball_p10"] = wf_pl[0.1]
+        wf_row["pinball_p50"] = wf_pl[0.5]
+        wf_row["pinball_p90"] = wf_pl[0.9]
+        wf_row["coverage_p10_p90"] = wf_coverage
+
+        wf_pred_df["p10_mw"] = wf_quantile_preds[0.1]
+        wf_pred_df["p50_mw"] = wf_quantile_preds[0.5]
+        wf_pred_df["p90_mw"] = wf_quantile_preds[0.9]
+
+        print(
+            f"  Fold {fold_idx} (TEST): WAPE={wf_metrics['wape']:.3f}% "
+            f"| MAE={wf_metrics['mae']:.1f} MW | Couverture={wf_coverage:.1f}%"
+        )
+    else:
+        print(f"  Fold {fold_idx}         : WAPE={wf_metrics['wape']:.3f}% | MAE={wf_metrics['mae']:.1f} MW")
+
+    wf_results.append(wf_row)
+    wf_predictions_all.append(wf_pred_df)
+
+wf_results_df = pd.DataFrame(wf_results)
+wf_predictions_all_df = pd.concat(wf_predictions_all, ignore_index=True)
+
+print("\n" + "=" * 70)
+print("MÉTRIQUES AGRÉGÉES WALK-FORWARD")
+print("=" * 70)
+for metric in ["wape", "mae", "rmse", "mape"]:
+    values = wf_results_df[metric]
+    print(f"  {metric.upper():6s} : {values.mean():.3f} ± {values.std():.3f}")
+
+# Pinball et coverage uniquement sur le dernier fold
+if "pinball_p10" in wf_results_df.columns:
+    last = wf_results_df[wf_results_df["pinball_p10"].notna()]
+    if len(last) > 0:
+        for q in QUANTILES:
+            val = last[f"pinball_p{int(q*100)}"].iloc[0]
+            print(f"  PL P{int(q*100):2d}  : {val:.3f} MW (dernier fold)")
+        print(f"  COUVERT : {last['coverage_p10_p90'].iloc[0]:.1f}% (dernier fold)")
+
+display(wf_results_df)
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## 16. Métriques détaillées
 
@@ -2005,6 +1983,139 @@ display(metrics_by_zone_and_day)
 
 print("Métriques par horizon")
 display(metrics_by_horizon)
+
+# COMMAND ----------
+
+# DBTITLE 1,Reconciliation header
+# MAGIC %md
+# MAGIC ## Réconciliation hiérarchique zone ↔ Ontario total
+# MAGIC
+# MAGIC **Méthode bottom-up** : la somme des prévisions zonales constitue le total Ontario.
+# MAGIC Garantit la cohérence hiérarchique par construction (Σ zones = total Ontario).
+
+# COMMAND ----------
+
+# DBTITLE 1,Reconciliation bottom-up
+# --- Réconciliation bottom-up : somme des prévisions zonales = total Ontario ---
+
+# Identifier les zones individuelles (exclure "Ontario" qui est le total).
+all_zones = sorted(test_predictions_df[ZONE_COLUMN].dropna().unique())
+individual_zones = [z for z in all_zones if z != "Ontario"]
+print(f"Zones individuelles : {individual_zones}")
+print(f"Zone 'Ontario' présente : {'Ontario' in all_zones}")
+
+# Bottom-up : somme des prévisions des zones individuelles.
+zonal_pred = test_predictions_df[
+    test_predictions_df[ZONE_COLUMN].isin(individual_zones)
+]
+
+ontario_bottomup = (
+    zonal_pred
+    .groupby(
+        [ISSUE_DATETIME_COLUMN, TARGET_DATETIME_COLUMN],
+        as_index=False,
+    )
+    .agg(
+        bottomup_actual_mw=(TARGET_COLUMN, "sum"),
+        bottomup_predicted_mw=("prediction_mw", "sum"),
+        bottomup_p10_mw=("p10_mw", "sum"),
+        bottomup_p50_mw=("p50_mw", "sum"),
+        bottomup_p90_mw=("p90_mw", "sum"),
+    )
+    .sort_values([ISSUE_DATETIME_COLUMN, TARGET_DATETIME_COLUMN])
+)
+
+# Ontario direct : prévisions de la zone "Ontario" (si présente).
+if "Ontario" in all_zones:
+    ontario_direct = (
+        test_predictions_df[test_predictions_df[ZONE_COLUMN] == "Ontario"]
+        .groupby([ISSUE_DATETIME_COLUMN, TARGET_DATETIME_COLUMN], as_index=False)
+        .agg(
+            direct_actual_mw=(TARGET_COLUMN, "first"),
+            direct_predicted_mw=("prediction_mw", "first"),
+        )
+        .sort_values([ISSUE_DATETIME_COLUMN, TARGET_DATETIME_COLUMN])
+    )
+    
+    comparison = ontario_bottomup.merge(
+        ontario_direct,
+        on=[ISSUE_DATETIME_COLUMN, TARGET_DATETIME_COLUMN],
+        how="inner",
+    )
+    
+    coherence_gap = np.mean(np.abs(
+        comparison["bottomup_actual_mw"] - comparison["direct_actual_mw"]
+    ))
+    print(f"\nÉcart moyen actual bottom-up vs Ontario direct : {coherence_gap:.1f} MW")
+    
+    ontario_metrics = calculate_metrics(
+        comparison["bottomup_actual_mw"],
+        comparison["bottomup_predicted_mw"],
+    )
+    ontario_direct_metrics = calculate_metrics(
+        comparison["direct_actual_mw"],
+        comparison["direct_predicted_mw"],
+    )
+else:
+    ontario_metrics = calculate_metrics(
+        ontario_bottomup["bottomup_actual_mw"],
+        ontario_bottomup["bottomup_predicted_mw"],
+    )
+
+print("\n" + "=" * 70)
+print("RÉCONCILIATION BOTTOM-UP : TOTAL ONTARIO")
+print("=" * 70)
+print_metrics("Total Ontario (bottom-up)", ontario_metrics)
+
+if "Ontario" in all_zones:
+    print_metrics("Total Ontario (modèle direct)", ontario_direct_metrics)
+    print(f"\n→ Le bottom-up (somme des {len(individual_zones)} zones) peut différer")
+    print(f"  du modèle direct (Ontario prédit séparément).")
+    print(f"  La réconciliation assure la cohérence hiérarchique.")
+
+# Couverture P10-P90 au niveau Ontario
+ontario_coverage = np.mean(
+    (ontario_bottomup["bottomup_actual_mw"] >= ontario_bottomup["bottomup_p10_mw"])
+    & (ontario_bottomup["bottomup_actual_mw"] <= ontario_bottomup["bottomup_p90_mw"])
+) * 100
+print(f"\nCouverture P10-P90 (Ontario bottom-up) : {ontario_coverage:.1f}%")
+
+# Visualisation : dernière prévision hebdomadaire avec intervalles
+latest_test_issue = ontario_bottomup[ISSUE_DATETIME_COLUMN].max()
+latest_week_ontario = ontario_bottomup[
+    ontario_bottomup[ISSUE_DATETIME_COLUMN] == latest_test_issue
+].sort_values(TARGET_DATETIME_COLUMN)
+
+fig, ax = plt.subplots(figsize=(16, 7))
+
+ax.fill_between(
+    latest_week_ontario[TARGET_DATETIME_COLUMN],
+    latest_week_ontario["bottomup_p10_mw"],
+    latest_week_ontario["bottomup_p90_mw"],
+    alpha=0.25,
+    color="orange",
+    label="Intervalle P10-P90",
+)
+ax.plot(
+    latest_week_ontario[TARGET_DATETIME_COLUMN],
+    latest_week_ontario["bottomup_actual_mw"],
+    label="Demande réelle Ontario",
+)
+ax.plot(
+    latest_week_ontario[TARGET_DATETIME_COLUMN],
+    latest_week_ontario["bottomup_predicted_mw"],
+    label="Prédiction (bottom-up)",
+)
+
+ax.set_xlabel("Date et heure cible")
+ax.set_ylabel("Demande totale Ontario (MW)")
+ax.set_title("Réconciliation bottom-up : total Ontario avec intervalles P10/P90")
+ax.legend()
+ax.grid(True, alpha=0.3)
+plt.xticks(rotation=45)
+plt.tight_layout()
+display(fig)
+plt.close(fig)
 
 # COMMAND ----------
 
@@ -2241,6 +2352,7 @@ plt.close(fig)
 
 # COMMAND ----------
 
+# DBTITLE 1,MLflow artifacts
 if os.path.exists(
     ARTIFACT_DIRECTORY
 ):
@@ -2254,7 +2366,6 @@ os.makedirs(
 )
 
 artifact_dataframes = {
-    "feature_quality.csv": feature_quality,
     "baseline_feature_importance.csv": (
         baseline_importance
     ),
@@ -2281,6 +2392,12 @@ artifact_dataframes = {
     ),
     "test_predictions.csv": (
         test_predictions_df
+    ),
+    "walk_forward_results.csv": (
+        wf_results_df
+    ),
+    "walk_forward_predictions.csv": (
+        wf_predictions_all_df
     ),
 }
 
@@ -2415,9 +2532,10 @@ print(
 
 # COMMAND ----------
 
+# DBTITLE 1,MLflow tags
 with mlflow.start_run(
     run_name=(
-        "lgbm_zonal_direct_multi_horizon_168h"
+        "lgbm_direct_multi_horizon_quantile_168h"
     )
 ) as run:
 
@@ -2478,6 +2596,10 @@ with mlflow.start_run(
             VALIDATION_RATIO
         ),
         "test_ratio": TEST_RATIO,
+        "n_walk_forward_folds": N_WALK_FORWARD_FOLDS,
+        "walk_forward_test_days": WALK_FORWARD_TEST_DAYS,
+        "quantiles": str(QUANTILES),
+        "reconciliation_method": RECONCILIATION_METHOD,
     })
 
     mlflow.log_metrics({
@@ -2515,6 +2637,14 @@ with mlflow.start_run(
         "selected_validation_wape": float(
             chosen_result["wape"]
         ),
+        "test_pinball_p10": pinball_loss(y_test, quantile_predictions_test[0.1], 0.1),
+        "test_pinball_p50": pinball_loss(y_test, quantile_predictions_test[0.5], 0.5),
+        "test_pinball_p90": pinball_loss(y_test, quantile_predictions_test[0.9], 0.9),
+        "test_quantile_coverage_p10_p90": coverage,
+        "wf_mean_wape": wf_results_df["wape"].mean(),
+        "wf_std_wape": wf_results_df["wape"].std(),
+        "wf_mean_mae": wf_results_df["mae"].mean(),
+        "wf_mean_coverage": wf_results_df["coverage_p10_p90"].mean(),
     })
 
     for _, row in (
@@ -2556,11 +2686,13 @@ with mlflow.start_run(
         ),
         "data_table": GOLD_TABLE,
         "split_strategy": (
-            "strict_temporal_purged"
+            "walk_forward_backtesting"
         ),
         "feature_selection": (
             "lightgbm_gain_validation_wape"
         ),
+        "quantile_forecasting": "P10_P50_P90",
+        "reconciliation": "bottom_up",
     })
 
     mlflow.log_artifacts(
@@ -2660,6 +2792,7 @@ print(
 
 # COMMAND ----------
 
+# DBTITLE 1,Final summary
 print("=" * 80)
 print("RÉSUMÉ FINAL")
 print("=" * 80)
@@ -2716,6 +2849,14 @@ print(
 )
 print(f"MLflow Run ID           : {run_id}")
 print(f"Model URI               : {model_uri}")
+print(f"Walk-forward             : {N_WALK_FORWARD_FOLDS} folds × {WALK_FORWARD_TEST_DAYS}j")
+print(f"  WAPE moyen             : {wf_results_df['wape'].mean():.3f}% ± {wf_results_df['wape'].std():.3f}")
+print(f"  MAE moyen              : {wf_results_df['mae'].mean():.1f} MW")
+print(f"  Couverture P10-P90     : {wf_results_df['coverage_p10_p90'].mean():.1f}%")
+print(f"Quantile forecasting     : P10/P50/P90")
+print(f"  Couverture test         : {coverage:.1f}%")
+print(f"  Largeur intervalle     : {interval_width:.1f} MW")
+print(f"Réconciliation           : bottom-up (zones → Ontario)")
 
 print("\nPerformances par jour :")
 

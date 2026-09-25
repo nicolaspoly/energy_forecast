@@ -1,0 +1,19 @@
+# Dépendances Python du projet Ontario Energy Demand Forecasting
+# Sur Databricks, pyspark/pandas/numpy/mlflow sont préinstallés sur le cluster.
+
+# API & données
+requests>=2.28
+pandas>=1.5
+numpy>=1.24
+pyyaml>=6.0
+
+# Spark (préinstallé sur Databricks, requis en local)
+pyspark>=3.3
+
+# Machine Learning
+lightgbm>=3.3
+scikit-learn>=1.2
+mlflow>=2.0
+
+# Visualisation (feature selection)
+matplotlib>=3.6

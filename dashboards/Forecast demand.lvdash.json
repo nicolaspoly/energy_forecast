@@ -22,27 +22,6 @@
       }
     },
     {
-      "name": "1eab02cf",
-      "displayName": "load_shap_7j",
-      "config": {
-        "version": "1.1",
-        "source": "workspace.energy_forecast.load_shap_7j",
-        "dimensions": [
-          {
-            "expr": "source.*"
-          }
-        ],
-        "measures": [
-          {
-            "name": "count",
-            "expr": "COUNT(*)",
-            "comment": "Represents the total number of rows in the dataset. Use this measure to count all",
-            "displayName": "Count"
-          }
-        ]
-      }
-    },
-    {
       "name": "6b5120fa",
       "displayName": "load_forecast_24h",
       "config": {
@@ -80,31 +59,6 @@
             "expr": "COUNT(*)",
             "comment": "Represents the total number of rows in the dataset. Use this measure to count all",
             "displayName": "Count"
-          }
-        ]
-      }
-    },
-    {
-      "name": "kpi_performance",
-      "displayName": "kpi_performance",
-      "config": {
-        "version": "1.1",
-        "source": "workspace.energy_forecast.model_performance_global",
-        "dimensions": [
-          {
-            "expr": "source.*"
-          }
-        ],
-        "measures": [
-          {
-            "name": "latest_mape",
-            "expr": "MAX(mape)",
-            "displayName": "MAPE actuel (%)"
-          },
-          {
-            "name": "latest_evaluation_time",
-            "expr": "MAX(evaluation_time)",
-            "displayName": "Dernière évaluation"
           }
         ]
       }
@@ -353,33 +307,6 @@
       ]
     },
     {
-      "name": "hourly_forecast",
-      "displayName": "Prévisions horaires",
-      "config": {
-        "version": "1.1",
-        "source": "SELECT * FROM workspace.energy_forecast.load_forecast_7j  WHERE zone = 'Ontario'\n",
-        "dimensions": [
-          {
-            "name": "target_datetime",
-            "expr": "target_datetime",
-            "displayName": "Heure"
-          },
-          {
-            "name": "hour_of_day",
-            "expr": "HOUR(target_datetime)",
-            "displayName": "Heure de la journée"
-          }
-        ],
-        "measures": [
-          {
-            "name": "predicted_demand_mw",
-            "expr": "SUM(predicted_demand_mw)",
-            "displayName": "Demande prévue (MW)"
-          }
-        ]
-      }
-    },
-    {
       "name": "peak_trough_hours",
       "displayName": "Distribution heures pics/creux",
       "queryLines": [
@@ -463,112 +390,6 @@
         "  daily_peak_trough\n",
         "WHERE\n",
         "  trough_hour IS NOT NULL"
-      ]
-    },
-    {
-      "name": "shap_top15_24h",
-      "displayName": "SHAP Top 15 features - 24h",
-      "queryLines": [
-        "WITH ranked_features AS (\n",
-        "  SELECT\n",
-        "    feature_name,\n",
-        "    AVG(ABS(shap_value)) as avg_abs_shap_value,\n",
-        "    ROW_NUMBER() OVER (ORDER BY AVG(ABS(shap_value)) DESC) as rank\n",
-        "  FROM\n",
-        "    workspace.energy_forecast.load_shap_24h\n",
-        "  GROUP BY\n",
-        "    feature_name\n",
-        ")\n",
-        "SELECT\n",
-        "  feature_name,\n",
-        "  avg_abs_shap_value\n",
-        "FROM\n",
-        "  ranked_features\n",
-        "WHERE\n",
-        "  rank <= 15\n",
-        "ORDER BY\n",
-        "  avg_abs_shap_value DESC"
-      ]
-    },
-    {
-      "name": "shap_peak_trough",
-      "displayName": "Valeurs SHAP pics et creux",
-      "queryLines": [
-        "WITH daily_peaks_troughs AS (\n",
-        "  SELECT\n",
-        "    DATE(target_datetime) as target_date,\n",
-        "    MAX(\n",
-        "      CASE\n",
-        "        WHEN predicted_demand_mw = max_demand THEN target_datetime\n",
-        "      END\n",
-        "    ) as peak_datetime,\n",
-        "    MAX(\n",
-        "      CASE\n",
-        "        WHEN predicted_demand_mw = min_demand THEN target_datetime\n",
-        "      END\n",
-        "    ) as trough_datetime\n",
-        "  FROM\n",
-        "    workspace.energy_forecast.load_forecast_7j\n",
-        "      CROSS JOIN (\n",
-        "        SELECT\n",
-        "          DATE(target_datetime) as dt,\n",
-        "          MAX(predicted_demand_mw) as max_demand,\n",
-        "          MIN(predicted_demand_mw) as min_demand\n",
-        "        FROM\n",
-        "          workspace.energy_forecast.load_forecast_7j\n",
-        "        WHERE\n",
-        "          zone = 'Ontario'\n",
-        "        GROUP BY\n",
-        "          DATE(target_datetime)\n",
-        "      ) daily_stats\n",
-        "  WHERE\n",
-        "    DATE(target_datetime) = dt\n",
-        "    AND zone = 'Ontario'\n",
-        "  GROUP BY\n",
-        "    DATE(target_datetime)\n",
-        "),\n",
-        "peak_shap AS (\n",
-        "  SELECT\n",
-        "    'Pic' as type_demande,\n",
-        "    s.feature_name,\n",
-        "    AVG(s.shap_value) as avg_shap_value,\n",
-        "    AVG(ABS(s.shap_value)) as avg_abs_shap_value\n",
-        "  FROM\n",
-        "    workspace.energy_forecast.load_shap_7j s\n",
-        "      INNER JOIN daily_peaks_troughs pt\n",
-        "        ON s.target_datetime = pt.peak_datetime\n",
-        "  WHERE\n",
-        "    s.zone = 'Ontario'\n",
-        "  GROUP BY\n",
-        "    s.feature_name\n",
-        "),\n",
-        "trough_shap AS (\n",
-        "  SELECT\n",
-        "    'Creux' as type_demande,\n",
-        "    s.feature_name,\n",
-        "    AVG(s.shap_value) as avg_shap_value,\n",
-        "    AVG(ABS(s.shap_value)) as avg_abs_shap_value\n",
-        "  FROM\n",
-        "    workspace.energy_forecast.load_shap_7j s\n",
-        "      INNER JOIN daily_peaks_troughs pt\n",
-        "        ON s.target_datetime = pt.trough_datetime\n",
-        "  WHERE\n",
-        "    s.zone = 'Ontario'\n",
-        "  GROUP BY\n",
-        "    s.feature_name\n",
-        ")\n",
-        "SELECT\n",
-        "  *\n",
-        "FROM\n",
-        "  peak_shap\n",
-        "UNION ALL\n",
-        "SELECT\n",
-        "  *\n",
-        "FROM\n",
-        "  trough_shap\n",
-        "ORDER BY\n",
-        "  type_demande,\n",
-        "  avg_abs_shap_value DESC"
       ]
     },
     {
@@ -677,20 +498,12 @@
           "datasetName": "ead14e7f"
         },
         {
-          "name": "load_shap_7j",
-          "datasetName": "1eab02cf"
-        },
-        {
           "name": "load_forecast_24h",
           "datasetName": "6b5120fa"
         },
         {
           "name": "load_shap_24h",
           "datasetName": "e3ad2ff9"
-        },
-        {
-          "name": "kpi_performance",
-          "datasetName": "kpi_performance"
         },
         {
           "name": "ontario_actual_vs_pred",
@@ -709,20 +522,8 @@
           "datasetName": "peak_trough_series"
         },
         {
-          "name": "Prvisions_horaires",
-          "datasetName": "hourly_forecast"
-        },
-        {
           "name": "Distribution_heures_picscreux",
           "datasetName": "peak_trough_hours"
-        },
-        {
-          "name": "SHAP_Top_15_features__24h",
-          "datasetName": "shap_top15_24h"
-        },
-        {
-          "name": "Valeurs_SHAP_pics_et_creux",
-          "datasetName": "shap_peak_trough"
         },
         {
           "name": "Pic_de_consommation",
@@ -731,15 +532,6 @@
         {
           "name": "Diffrences_SHAP_Pic_vs_Creux",
           "datasetName": "shap_diff_pic_creux"
-        }
-      ],
-      "relationships": [
-        {
-          "name": "relationship_0",
-          "from": "load_forecast_7j",
-          "to": "load_shap_7j",
-          "on": "`load_forecast_7j`.`zone` = `load_shap_7j`.`zone` AND `load_forecast_7j`.`target_datetime` = `load_shap_7j`.`target_datetime` AND `load_forecast_7j`.`prediction_time` = `load_shap_7j`.`prediction_time`",
-          "cardinality": "CARDINALITY_ONE_TO_MANY"
         }
       ]
     }

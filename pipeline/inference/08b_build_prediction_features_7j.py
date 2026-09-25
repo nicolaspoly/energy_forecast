@@ -2140,6 +2140,23 @@ print("=" * 80)
 
 spark = SparkSession.builder.getOrCreate()
 
+
+def _pandas_to_spark_df(pdf, label="temp"):
+    """Convertit un DataFrame pandas en Spark DataFrame via parquet intermédiaire.
+
+    spark.createDataFrame(pandas_df) peut se bloquer sur compute serverless
+    (Spark Connect). On passe par un fichier parquet temporaire pour éviter
+    ce problème.
+    """
+    import tempfile, shutil
+    tmp = tempfile.mkdtemp(prefix=f"spark_{label}_")
+    parquet_path = f"{tmp}/data.parquet"
+    pdf.to_parquet(parquet_path, index=False)
+    sdf = spark.read.parquet(parquet_path)
+    shutil.rmtree(tmp, ignore_errors=True)
+    return sdf
+
+
 # Tables de sortie avec suffixe _7j pour le modèle 7 jours
 FEATURE_DEMAND_TABLE = f"{CATALOG}.{SCHEMA}.feature_demand_history_7j"
 FEATURE_TABLE = f"{CATALOG}.{SCHEMA}.feature_weather_forecast_7j"
@@ -2147,7 +2164,7 @@ METADATA_TABLE = f"{CATALOG}.{SCHEMA}.feature_metadata_7j"
 
 # 1. Historique de demande brut (pour prédiction directe 7j)
 print(f"\n[1/3] Sauvegarde de l'historique de demande dans {FEATURE_DEMAND_TABLE}...")
-demand_history_spark = spark.createDataFrame(demand_history)
+demand_history_spark = _pandas_to_spark_df(demand_history, "demand_history")
 demand_history_spark.write.format("delta").mode("overwrite").saveAsTable(
     FEATURE_DEMAND_TABLE
 )
@@ -2157,7 +2174,7 @@ print(f"  ✅ {len(demand_history):,} lignes écrites (340h d'historique)")
 print(f"\n[2/3] Sauvegarde des features complètes dans {FEATURE_TABLE}...")
 weather_forecast_export = weather_forecast_7j.copy()
 weather_forecast_export["zone"] = weather_forecast_export["zone"].astype(str)
-weather_forecast_spark = spark.createDataFrame(weather_forecast_export)
+weather_forecast_spark = _pandas_to_spark_df(weather_forecast_export, "weather_forecast")
 weather_forecast_spark.write.format("delta").mode("overwrite").saveAsTable(
     FEATURE_TABLE
 )
@@ -2172,7 +2189,7 @@ metadata_df = pd.DataFrame([{
     "prediction_end": prediction_end_7j,
     "created_at": pd.Timestamp.now(),
 }])
-metadata_spark = spark.createDataFrame(metadata_df)
+metadata_spark = _pandas_to_spark_df(metadata_df, "metadata")
 metadata_spark.write.format("delta").mode("overwrite").saveAsTable(
     METADATA_TABLE
 )

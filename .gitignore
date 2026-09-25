@@ -15,6 +15,7 @@ venv/
 
 # Data & exports (ne pas versionner les données brutes)
 data/archive/*.csv
+data/archive/*.parquet
 data/exports/*.csv
 
 # IDE

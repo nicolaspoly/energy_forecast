@@ -109,7 +109,7 @@ from pyspark.sql.types import DoubleType
 # Chemin du projet : surchargeable via ENERGY_FORECAST_PROJECT_ROOT.
 PROJECT_ROOT = os.environ.get(
     "ENERGY_FORECAST_PROJECT_ROOT",
-    "/Workspace/Users/n.jouglet23@gmail.com/energy_forecast_clean",
+    "/Workspace/Users/n.jouglet23@gmail.com/energy_forecast",
 )
 CONFIG_PATH = f"{PROJECT_ROOT}/config/config.yaml"
 
@@ -576,6 +576,15 @@ df_expanded = (
     .withColumn(
         "forecast_horizon_cos_168h",
         F.cos(F.lit(2.0 * np.pi) * F.col("forecast_horizon_hours") / F.lit(168.0))
+    )
+    # Transformations non-linéaires de l'horizon (dégradation avec la distance).
+    .withColumn(
+        "forecast_horizon_sqrt",
+        F.sqrt(F.col("forecast_horizon_hours"))
+    )
+    .withColumn(
+        "forecast_horizon_log1p",
+        F.log1p(F.col("forecast_horizon_hours"))
     )
 )
 

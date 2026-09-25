@@ -1765,6 +1765,10 @@ if not insufficient_history.empty:
 
 LAG_HOURS = globals().get("LAG_HOURS", [
     1,
+    2,
+    3,
+    6,
+    12,
     24,
     48,
     72,
@@ -2057,6 +2061,11 @@ if current_time.hour < 8:
 # Calculer 25 heures (08h -> 08h inclus le lendemain)
 prediction_end = prediction_start + pd.Timedelta(hours=25)
 
+# Sauvegarder les données météo complètes (388h d'historique + forecast)
+# avant le filtrage à la fenêtre de prédiction : les features historiques
+# (lags jusqu'à 168h, rolling windows jusqu'à 168h) en ont besoin.
+weather_all_zones = weather_forecast_24h.copy()
+
 weather_forecast_24h = weather_forecast_24h[
     (weather_forecast_24h["target_datetime"] >= prediction_start)
     & (weather_forecast_24h["target_datetime"] < prediction_end)
@@ -2086,7 +2095,7 @@ print("=" * 80)
 
 # Renommer les colonnes pour correspondre au format attendu par la construction des features
 # Note: Les colonnes ont déjà été renommées plus haut (_c, _pct, _kmh), on utilise les nouveaux noms
-weather_history = weather_forecast_24h[[
+weather_history = weather_all_zones[[
     "target_datetime",
     "zone",
     "weather_target_temperature_c",
@@ -2170,11 +2179,11 @@ for zone_name, zone_data in weather_history.groupby("zone"):
     features["temperature_c"] = temp_series.get(ref_time, np.nan)
 
     # Lags de temperature.
-    for lag in [24, 168]:
-        lag_time = ref_time - pd.Timedelta(hours=lag - 1)
+    for lag in [1, 3, 6, 12, 24, 48, 72, 168]:
+        lag_time = ref_time - pd.Timedelta(hours=lag)
         features[f"temperature_lag_{lag}h"] = temp_series.get(lag_time, np.nan)
 
-    # Rolling temperature.
+    # Rolling temperature (min/max/std pour fenetres larges, mean pour toutes).
     for window in [24, 72, 168]:
         window_data = temp_series.loc[:ref_time].tail(window)
         features[f"temperature_rolling_min_{window}h"] = window_data.min()
@@ -2182,13 +2191,35 @@ for zone_name, zone_data in weather_history.groupby("zone"):
         features[f"temperature_rolling_mean_{window}h"] = window_data.mean()
         features[f"temperature_rolling_std_{window}h"] = window_data.std()
 
+    for window in [3, 6, 12, 48]:
+        window_data = temp_series.loc[:ref_time].tail(window)
+        features[f"temperature_rolling_mean_{window}h"] = window_data.mean()
+
+    # Variations de temperature.
+    t_ref = temp_series.get(ref_time, np.nan)
+    for change_lag in [1, 6, 24]:
+        t_prev = temp_series.get(ref_time - pd.Timedelta(hours=change_lag), np.nan)
+        features[f"temperature_change_{change_lag}h"] = (
+            t_ref - t_prev
+            if pd.notna(t_ref) and pd.notna(t_prev)
+            else np.nan
+        )
+
+    # Lags d'humidite.
+    for lag in [1, 3, 6, 12, 24, 48, 72, 168]:
+        lag_time = ref_time - pd.Timedelta(hours=lag)
+        features[f"humidity_lag_{lag}h"] = humidity_series.get(lag_time, np.nan)
+
     # Rolling humidite.
-    for window in [24, 48, 72, 168]:
+    for window in [3, 6, 12, 24, 48, 72, 168]:
         humidity_window = humidity_series.loc[:ref_time].tail(window)
         features[f"humidity_rolling_mean_{window}h"] = humidity_window.mean()
 
+    # Precipitation actuelle.
+    features["precipitation_mm"] = precip_series.get(ref_time, np.nan)
+
     # Rolling precipitation.
-    for window in [72, 168]:
+    for window in [24, 72, 168]:
         precip_window = precip_series.loc[:ref_time].tail(window)
         features[f"precipitation_rolling_sum_{window}h"] = precip_window.sum()
 
@@ -2290,6 +2321,23 @@ print("=" * 80)
 
 spark = SparkSession.builder.getOrCreate()
 
+
+def _pandas_to_spark_df(pdf, label="temp"):
+    """Convertit un DataFrame pandas en Spark DataFrame via parquet intermédiaire.
+
+    spark.createDataFrame(pandas_df) peut se bloquer sur compute serverless
+    (Spark Connect). On passe par un fichier parquet temporaire pour éviter
+    ce problème.
+    """
+    import tempfile, shutil
+    tmp = tempfile.mkdtemp(prefix=f"spark_{label}_")
+    parquet_path = f"{tmp}/data.parquet"
+    pdf.to_parquet(parquet_path, index=False)
+    sdf = spark.read.parquet(parquet_path)
+    shutil.rmtree(tmp, ignore_errors=True)
+    return sdf
+
+
 # Tables de sortie
 FEATURE_DEMAND_TABLE = f"{CATALOG}.{SCHEMA}.feature_demand_history"
 FEATURE_TABLE = f"{CATALOG}.{SCHEMA}.feature_weather_forecast"
@@ -2297,7 +2345,7 @@ METADATA_TABLE = f"{CATALOG}.{SCHEMA}.feature_metadata"
 
 # 1. Historique de demande brut (pour prédiction itérative)
 print(f"\n[1/3] Sauvegarde de l'historique de demande dans {FEATURE_DEMAND_TABLE}...")
-demand_history_spark = spark.createDataFrame(demand_history)
+demand_history_spark = _pandas_to_spark_df(demand_history, "demand_history")
 demand_history_spark.write.format("delta").mode("overwrite").saveAsTable(
     FEATURE_DEMAND_TABLE
 )
@@ -2308,8 +2356,8 @@ print(f"\n[2/3] Sauvegarde des features complètes dans {FEATURE_TABLE}...")
 # Convertir zone en string pour Spark (category non supporté)
 weather_forecast_export = weather_forecast_24h.copy()
 weather_forecast_export["zone"] = weather_forecast_export["zone"].astype(str)
-weather_forecast_spark = spark.createDataFrame(weather_forecast_export)
-weather_forecast_spark.write.format("delta").mode("overwrite").saveAsTable(
+weather_forecast_spark = _pandas_to_spark_df(weather_forecast_export, "weather_forecast")
+weather_forecast_spark.write.format("delta").mode("overwrite").option("overwriteSchema", "true").saveAsTable(
     FEATURE_TABLE
 )
 print(f"  ✅ {len(weather_forecast_24h):,} lignes écrites")
@@ -2323,7 +2371,7 @@ metadata_df = pd.DataFrame([{
     "prediction_end": prediction_end,
     "created_at": pd.Timestamp.now(),
 }])
-metadata_spark = spark.createDataFrame(metadata_df)
+metadata_spark = _pandas_to_spark_df(metadata_df, "metadata")
 metadata_spark.write.format("delta").mode("overwrite").saveAsTable(
     METADATA_TABLE
 )

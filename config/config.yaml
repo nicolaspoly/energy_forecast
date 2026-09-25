@@ -214,7 +214,7 @@ jobs:
     schedule: "30 */6 * * *"  # 30 min après ingestion
     tasks:
       - "pipeline/silver/03_join_demand_weather"
-      - "pipeline/gold/04_build_features"        # -> ml_features_gold_24h
+      - "pipeline/gold/04_build_features_24h"   # -> ml_features_gold_24h
       - "pipeline/gold/04_build_features_7j"     # -> ml_features_gold_7j
       - "pipeline/gold/05_feature_selection"     # dédié au modèle 24h
 
@@ -229,17 +229,17 @@ jobs:
     name: "ontario_demand_prediction_24h"
     schedule: "0 1,7,13,19 * * *"  # 01h, 07h, 13h, 19h
     tasks:
-      # 09_batch_prediction exécute 08_build_prediction_features via exec()
+      # 09_batch_prediction_24h exécute 08_build_prediction_features_24h via exec()
       # (voir le fichier lui-même) -> une seule tâche de job suffit.
-      - "pipeline/inference/09_batch_prediction"
+      - "pipeline/inference/09_batch_prediction_24h"
 
   prediction_7j:
     name: "ontario_demand_prediction_7j"
     schedule: "0 2,14 * * *"  # 02h, 14h (deux fois par jour)
     tasks:
-      # 09b exécute 08b (qui exécute 08 avec MODEL_HORIZON_KEY='horizon_7j')
+      # 09b exécute 08b (qui exécute 08_24h avec MODEL_HORIZON_KEY='horizon_7j')
       # via exec() en cascade -> une seule tâche de job suffit.
-      - "pipeline/inference/09b_batch_prediction_7j_direct"
+      - "pipeline/inference/09b_batch_prediction_7j"
 
   evaluation:
     name: "ontario_demand_evaluation"
