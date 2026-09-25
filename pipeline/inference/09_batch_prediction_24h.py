@@ -9,23 +9,22 @@ Prédictions itératives sur **24 heures** avec le modèle MLflow "Production" (
 features de demande (lags, rolling) de l'heure suivante.
 
 **Approche récursive :**
-- Le modèle 24h (entraîné par `06_train_model_24hv2`) est utilisé de façon
+- Le modèle 24h (entraîné par `06_train_model_24h`) est utilisé de façon
   itérative pour générer H+1, H+2, ..., H+24.
 - Chaque prédiction devient une "observation" pour calculer les features de
   l'heure suivante (demand_lag_1h, rolling windows, etc.).
 
 **Pour des prévisions à 7 jours (H+168) :**
-Utilisez le notebook `09b_batch_prediction_7j_direct` qui utilise le modèle
+Utilisez le notebook `09b_batch_prediction_7j.py` qui utilise le modèle
 7 jours avec une approche directe (non-récursive) basée sur
 `forecast_horizon_hours`.
 
 **Next:**
 - `10_model_evaluation.py` (Monitoring)
-- `09b_batch_prediction_7j_direct` pour des prévisions à 7 jours (H+168)
+- `09b_batch_prediction_7j.py` pour des prévisions à 7 jours (H+168)
 """
 
-import subprocess
-subprocess.run(["pip", "install", "lightgbm", "-q"], check=True)
+%pip install lightgbm -q
 
 import os
 import yaml
@@ -39,6 +38,23 @@ from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 
 spark = SparkSession.builder.getOrCreate()
+
+
+def _pandas_to_spark_df(pdf, label="temp"):
+    """Convertit un DataFrame pandas en Spark DataFrame via parquet intermédiaire.
+
+    spark.createDataFrame(pandas_df) peut se bloquer sur compute serverless
+    (Spark Connect). On passe par un fichier parquet temporaire pour éviter
+    ce problème.
+    """
+    import tempfile, shutil
+    tmp = tempfile.mkdtemp(prefix=f"spark_{label}_")
+    parquet_path = f"{tmp}/data.parquet"
+    pdf.to_parquet(parquet_path, index=False)
+    sdf = spark.read.parquet(parquet_path)
+    shutil.rmtree(tmp, ignore_errors=True)
+    return sdf
+
 
 # ============================================================
 # CONFIGURATION
@@ -55,9 +71,9 @@ with open(f'{PROJECT_ROOT}/config/config.yaml', 'r') as f:
 
 CATALOG = config['catalog']['name']
 SCHEMA = config['catalog']['schema']
-# Table de prédictions 24h (récursif)
-FORECAST_TABLE = f"{CATALOG}.{SCHEMA}.load_forecast_24h"
-SHAP_TABLE = f"{CATALOG}.{SCHEMA}.load_shap_24h"
+# Table de prédictions 24h (récursif) — noms issus de config.yaml
+FORECAST_TABLE = f"{CATALOG}.{SCHEMA}.{config['catalog']['tables']['gold']['load_forecast']}"
+SHAP_TABLE = f"{CATALOG}.{SCHEMA}.{config['catalog']['tables']['gold']['load_shap']}"
 # Modèle utilisé pour la boucle récursive (voir avertissement ci-dessus).
 # Changer pour "horizon_7j" uniquement si le modèle long-terme a été entraîné
 # avec les mêmes features récursives (lags courts) que le modèle 24h — ce qui
@@ -99,7 +115,7 @@ if not table_exists:
         f"\n{'='*80}\n"
         f"ERREUR: La table {METADATA_TABLE} n'existe pas.\n"
         f"{'='*80}\n\n"
-        f"Vous devez d'abord exécuter 08_build_prediction_features.py pour:\n"
+        f"Vous devez d'abord exécuter 08_build_prediction_features_24h.py pour:\n"
         f"  1. Télécharger les données IESO et météo (340h+ d'historique)\n"
         f"  2. Calculer toutes les features (lags, rolling windows, etc.)\n"
         f"  3. Sauvegarder dans les tables Unity Catalog\n\n"
@@ -107,7 +123,7 @@ if not table_exists:
         f"  - {FEATURE_DEMAND_TABLE} (historique brut pour itération)\n"
         f"  - {FEATURE_TABLE} (toutes les features assemblées)\n"
         f"  - {METADATA_TABLE} (timestamps de référence)\n\n"
-        f"Commande: Exécutez 08_build_prediction_features.py\n"
+        f"Commande: Exécutez 08_build_prediction_features_24h.py\n"
         f"{'='*80}"
     )
 
@@ -115,7 +131,7 @@ metadata_df = spark.table(METADATA_TABLE).toPandas()
 if metadata_df.empty:
     raise ValueError(
         f"Aucune métadonnée trouvée dans {METADATA_TABLE}. "
-        "Exécutez d'abord 08_build_prediction_features.py."
+        "Exécutez d'abord 08_build_prediction_features_24h.py."
     )
 
 ref_time = pd.to_datetime(metadata_df['ref_time'].iloc[0])
@@ -418,7 +434,7 @@ print(predictions_df.head(20).to_string())
 
 print(f"\n[4/5] Écriture dans {FORECAST_TABLE}...")
 
-spark_df = spark.createDataFrame(predictions_df)
+spark_df = _pandas_to_spark_df(predictions_df, "predictions")
 
 spark.sql(f"""
     CREATE TABLE IF NOT EXISTS {FORECAST_TABLE} (
@@ -456,7 +472,7 @@ if not shap_df.empty:
         PARTITIONED BY (target_date)
     """)
 
-    shap_spark_df = spark.createDataFrame(shap_df)
+    shap_spark_df = _pandas_to_spark_df(shap_df, "shap")
     shap_spark_df.write.format("delta").mode("overwrite").saveAsTable(
         SHAP_TABLE,
     )

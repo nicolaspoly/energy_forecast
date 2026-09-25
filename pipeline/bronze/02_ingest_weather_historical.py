@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 """
 02 - Ingestion Weather.gc.ca (Bronze Layer)
-Code adapté de notebook:4400736406054312:Import_meteo_zone
 
 Source: Weather.gc.ca Climate Hourly API
 Destination: workspace.energy_forecast.weather_bronze

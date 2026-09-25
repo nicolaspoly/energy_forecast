@@ -66,7 +66,7 @@ from pyspark.sql.types import DoubleType
 # Chemin du projet : surchargeable via ENERGY_FORECAST_PROJECT_ROOT.
 PROJECT_ROOT = os.environ.get(
     "ENERGY_FORECAST_PROJECT_ROOT",
-    "/Workspace/Users/n.jouglet23@gmail.com/energy_forecast_clean",
+    "/Workspace/Users/n.jouglet23@gmail.com/energy_forecast",
 )
 CONFIG_PATH = f"{PROJECT_ROOT}/config/config.yaml"
 

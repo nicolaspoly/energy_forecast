@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-Gold Layer - 02 Feature Selection
+Gold Layer - 05 Feature Selection
 
 Objectif: Analyser et sélectionner les meilleures features pour le ML
 - Corrélation avec la target
@@ -17,11 +17,6 @@ Ce script est dédié au modèle 24h : le modèle 7 jours a sa propre table Gold
 propre sélection de features intégrée à `07_train_model_7j.py`.
 """
 
-# Install required packages
-import subprocess
-import sys
-subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "lightgbm"])
-
 import os
 import yaml
 import pandas as pd
@@ -35,7 +30,7 @@ from sklearn.model_selection import train_test_split
 # Chemin du projet : surchargeable via ENERGY_FORECAST_PROJECT_ROOT.
 PROJECT_ROOT = os.environ.get(
     "ENERGY_FORECAST_PROJECT_ROOT",
-    "/Workspace/Users/n.jouglet23@gmail.com/energy_forecast_clean",
+    "/Workspace/Users/n.jouglet23@gmail.com/energy_forecast",
 )
 
 # Configuration
@@ -46,7 +41,7 @@ CATALOG = config['catalog']['name']
 SCHEMA = config['catalog']['schema']
 
 # NOTE (nettoyage complémentaire): pointait auparavant vers `ml_features_gold`,
-# une table jamais créée par aucun script (04_build_features.py écrit en
+# une table jamais créée par aucun script (04_build_features_24h.py écrit en
 # réalité dans `ml_features_gold_24h`) — ce qui aurait fait échouer ce script
 # à l'exécution. Corrigé pour pointer vers la vraie table de sortie du 24h.
 INPUT_TABLE = f"{CATALOG}.{SCHEMA}.ml_features_gold_24h"
